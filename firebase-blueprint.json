@@ -1,0 +1,160 @@
+{
+  "entities": {
+    "Firm": {
+      "title": "TenantFirm",
+      "description": "Syndicate tenant firm entity",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "code": { "type": "string" },
+        "location": { "type": "string" },
+        "state": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "name", "code", "status"]
+    },
+    "Project": {
+      "title": "Project",
+      "description": "Real estate or syndicate project venture",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "firmId": { "type": "string" },
+        "name": { "type": "string" },
+        "sector": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "firmId", "name", "sector"]
+    },
+    "Partner": {
+      "title": "SyndicatePartner",
+      "description": "Syndicate partner investor profile",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "firmId": { "type": "string" },
+        "name": { "type": "string" },
+        "initialCapital": { "type": "number" },
+        "actualInvested": { "type": "number" }
+      },
+      "required": ["id", "firmId", "name"]
+    },
+    "FirmAccount": {
+      "title": "FirmAccount",
+      "description": "Multi-bank treasury and cash accounts",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "firmId": { "type": "string" },
+        "accountName": { "type": "string" },
+        "accountType": { "type": "string" },
+        "currentBalance": { "type": "number" }
+      },
+      "required": ["id", "firmId", "accountName", "accountType"]
+    },
+    "IndividualInvestment": {
+      "title": "IndividualInvestmentRecord",
+      "description": "Dual cash and bank partner capital investments",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "firmId": { "type": "string" },
+        "projectId": { "type": "string" },
+        "partnerId": { "type": "string" },
+        "partnerName": { "type": "string" },
+        "amount": { "type": "number" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "firmId", "partnerId", "amount", "status"]
+    },
+    "FieldExpense": {
+      "title": "FieldExpenseLog",
+      "description": "Site operations and field expense claims",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "firmId": { "type": "string" },
+        "projectId": { "type": "string" },
+        "amount": { "type": "number" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "firmId", "amount", "status"]
+    },
+    "Plot": {
+      "title": "Plot",
+      "description": "Open plotting venture plots",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "firmId": { "type": "string" },
+        "projectId": { "type": "string" },
+        "plotNumber": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "firmId", "plotNumber", "status"]
+    },
+    "ApartmentUnit": {
+      "title": "ApartmentUnit",
+      "description": "Construction flat/unit inventory",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "firmId": { "type": "string" },
+        "projectId": { "type": "string" },
+        "unitNumber": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "firmId", "unitNumber", "status"]
+    },
+    "AuditLog": {
+      "title": "AuditLogEntry",
+      "description": "Immutable statutory and audit logs",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "action": { "type": "string" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["id", "action", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/firms/{firmId}": {
+      "schema": { "$ref": "#/entities/Firm" },
+      "description": "Tenant firm directory"
+    },
+    "/projects/{projectId}": {
+      "schema": { "$ref": "#/entities/Project" },
+      "description": "Venture projects"
+    },
+    "/partners/{partnerId}": {
+      "schema": { "$ref": "#/entities/Partner" },
+      "description": "Syndicate partners"
+    },
+    "/firmAccounts/{accountId}": {
+      "schema": { "$ref": "#/entities/FirmAccount" },
+      "description": "Treasury and bank accounts"
+    },
+    "/individualInvestments/{investmentId}": {
+      "schema": { "$ref": "#/entities/IndividualInvestment" },
+      "description": "Individual capital investments"
+    },
+    "/fieldExpenses/{expenseId}": {
+      "schema": { "$ref": "#/entities/FieldExpense" },
+      "description": "Field expense logs"
+    },
+    "/plots/{plotId}": {
+      "schema": { "$ref": "#/entities/Plot" },
+      "description": "Open plotting plots"
+    },
+    "/apartmentUnits/{unitId}": {
+      "schema": { "$ref": "#/entities/ApartmentUnit" },
+      "description": "Construction units"
+    },
+    "/auditLogs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Audit trail"
+    }
+  }
+}

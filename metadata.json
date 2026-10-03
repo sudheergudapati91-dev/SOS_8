@@ -1,0 +1,6 @@
+{
+  "name": "SyndicateOS - AP & Telangana Syndicate ERP",
+  "description": "Multi-Tenant Business Syndicate Management & Accounting SaaS Platform tailored for AP/Telangana multi-partner businesses with open plotting, construction, dynamic equity, and field partner apps.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
