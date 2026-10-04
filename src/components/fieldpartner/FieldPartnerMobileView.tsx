@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   SyndicatePartner,
   FieldExpenseLog,
@@ -59,15 +59,23 @@ export type Language = 'en' | 'te';
 
 export interface DrawingRequest {
   id: string;
+  firmId?: string;
+  projectId?: string;
   partnerId: string;
   partnerName: string;
   amount: number;
+  sourceAccountId?: string;
+  sourceAccountName?: string;
   payoutMode: 'Bank Transfer' | 'Field Vault Cash' | 'Cheque';
-  accountDetails: string;
+  accountDetails?: string;
+  destinationAccountDetails?: string;
   purpose: string;
   requestedAt: string;
   status: 'pending_approval' | 'approved' | 'cleared';
   reviewedBy?: string;
+  reviewedAt?: string;
+  disbursedBy?: string;
+  disbursedAt?: string;
 }
 
 export interface FieldPartnerMobileViewProps {
@@ -97,6 +105,7 @@ export interface FieldPartnerMobileViewProps {
   onApproveExpense?: (expenseId: string, signoff?: string) => void;
   onRejectExpense?: (expenseId: string) => void;
   ledgerMode?: LedgerMode;
+  onUpdatePartner?: (partner: SyndicatePartner) => void;
   individualInvestments?: IndividualInvestmentRecord[];
   onRecordIndividualInvestment?: (data: IndividualInvestmentData) => void;
   onApproveIndividualInvestment?: (investmentId: string, approverName: string) => void;
@@ -393,6 +402,7 @@ export const FieldPartnerMobileView: React.FC<FieldPartnerMobileViewProps> = ({
   onApproveExpense,
   onRejectExpense,
   ledgerMode = 'internal_syndicate',
+  onUpdatePartner,
   individualInvestments = [],
   onRecordIndividualInvestment,
   onApproveIndividualInvestment,
@@ -425,18 +435,102 @@ export const FieldPartnerMobileView: React.FC<FieldPartnerMobileViewProps> = ({
   const [selectedMobilePlot, setSelectedMobilePlot] = useState<Plot | null>(null);
 
   // Login Gate State (when session is null)
-  const [loginFirmId, setLoginFirmId] = useState<string>(session?.firmId || firm.id || firms[0]?.id);
-  const firmAvailableUsers = partners.filter(
-    (p) => p.firmId === loginFirmId || (!p.firmId && loginFirmId === 'firm-1')
-  );
+  const [loginFirmId, setLoginFirmId] = useState<string>(session?.firmId || firm.id || firms[0]?.id || '');
+
+  // Keep loginFirmId in sync if firm loads asynchronously from cloud datastore
+  useEffect(() => {
+    if (firm?.id && firm.id !== loginFirmId) {
+      setLoginFirmId(firm.id);
+    }
+  }, [firm?.id, loginFirmId]);
+
+  const firmAvailableUsers = useMemo(() => {
+    const list: SyndicatePartner[] = [];
+    const seenIds = new Set<string>();
+    const seenNames = new Set<string>();
+
+    const targetFirmId = firm?.id || loginFirmId;
+
+    // 1. Direct syndicate partners passed for this firm
+    partners.forEach((p) => {
+      const matchesFirm =
+        !p.firmId ||
+        !targetFirmId ||
+        p.firmId === targetFirmId ||
+        p.firmId === firm?.id ||
+        (!p.firmId && targetFirmId === 'firm-1');
+      if (matchesFirm) {
+        const idKey = String(p.id);
+        const nameKey = p.name.trim().toLowerCase();
+        if (!seenIds.has(idKey) && !seenNames.has(nameKey)) {
+          list.push(p);
+          seenIds.add(idKey);
+          seenNames.add(nameKey);
+        }
+      }
+    });
+
+    // 2. Partners registered directly within projects of this firm
+    projects
+      .filter((proj) => !proj.firmId || !targetFirmId || proj.firmId === targetFirmId || proj.firmId === firm?.id)
+      .forEach((proj) => {
+        (proj.partners || []).forEach((ps) => {
+          const idKey = String(ps.partnerId);
+          const nameKey = ps.name.trim().toLowerCase();
+          if (!seenIds.has(idKey) && !seenNames.has(nameKey)) {
+            seenIds.add(idKey);
+            seenNames.add(nameKey);
+            list.push({
+              id: ps.partnerId,
+              firmId: targetFirmId || proj.firmId,
+              name: ps.name,
+              phone: ps.phone || '+91 ',
+              roleDescription: ps.roleInProject || 'Investor Partner',
+              avatarColor: ps.avatarColor || 'bg-indigo-600',
+              initialCapital: ps.initialCapital || 0,
+              actualInvested: ps.actualInvested || 0,
+              fixedEquityPercent: ps.equityPercent || 0,
+              drawings: ps.drawings || 0,
+              shareOfFieldExpenses: ps.shareOfFieldExpenses || 0,
+              userRole: ps.roleInProject?.toLowerCase().includes('managing')
+                ? 'managing_partner'
+                : 'field_partner',
+              userStatus: 'active',
+              pinCode: '1234',
+              dailySpendingLimit: 50000,
+            });
+          }
+        });
+      });
+
+    // Fall back to all partners if empty
+    if (list.length === 0 && partners.length > 0) {
+      return partners;
+    }
+
+    return list;
+  }, [partners, projects, loginFirmId, firm?.id]);
+
   const [loginPartnerId, setLoginPartnerId] = useState<string>(
-    session?.partnerId || firmAvailableUsers[0]?.id || ''
+    session?.partnerId || ''
   );
+
+  useEffect(() => {
+    if (session?.partnerId) {
+      setLoginPartnerId(session.partnerId);
+    } else if (!loginPartnerId || !firmAvailableUsers.some((u) => u.id === loginPartnerId)) {
+      if (firmAvailableUsers[0]) {
+        setLoginPartnerId(firmAvailableUsers[0].id);
+      }
+    }
+  }, [session?.partnerId, firmAvailableUsers, loginPartnerId]);
   const [loginPin, setLoginPin] = useState<string>('');
   const [loginError, setLoginError] = useState<string>('');
 
-  // Expenses Tab form state
+  // Expenses Tab form state: Payment Source (Project Bank vs Individual)
   const [expenseAmount, setExpenseAmount] = useState<string>('');
+  const [expensePaymentSource, setExpensePaymentSource] = useState<'project_bank' | 'individual'>('project_bank');
+  const [expenseBankAccountId, setExpenseBankAccountId] = useState<string>('');
   const [expenseCategory, setExpenseCategory] = useState<FieldExpenseLog['category']>('Labor Wages');
   const [expensePaymentMode, setExpensePaymentMode] = useState<FieldExpenseLog['paymentMode']>('Field Cash Imprest');
   const [expenseVendor, setExpenseVendor] = useState<string>('');
@@ -451,13 +545,14 @@ export const FieldPartnerMobileView: React.FC<FieldPartnerMobileViewProps> = ({
   // Expenses sub-filter
   const [expenseFilter, setExpenseFilter] = useState<'all' | 'pending' | 'approved'>('all');
 
-  // Drawing Request State
+  // Drawing Request State: Source Account & Destination Account
   const [drawAmount, setDrawAmount] = useState<string>('');
+  const [drawSourceAccountId, setDrawSourceAccountId] = useState<string>('');
   const [drawPayoutMode, setDrawPayoutMode] = useState<'Bank Transfer' | 'Field Vault Cash' | 'Cheque'>('Bank Transfer');
-  const [drawAccountDetails, setDrawAccountDetails] = useState<string>('');
+  const [drawDestinationAccountDetails, setDrawDestinationAccountDetails] = useState<string>('');
   const [drawPurpose, setDrawPurpose] = useState<string>('');
   const [submittedDrawings, setSubmittedDrawings] = useState<DrawingRequest[]>(() => {
-    const saved = localStorage.getItem(`syndicate_draw_requests_${session?.partnerId || 'p1'}`);
+    const saved = localStorage.getItem(`syndicate_draw_requests_${firm.id || 'all'}`);
     if (saved) {
       try {
         return JSON.parse(saved);
@@ -468,11 +563,12 @@ export const FieldPartnerMobileView: React.FC<FieldPartnerMobileViewProps> = ({
     return [
       {
         id: 'draw-initial-1',
+        firmId: firm.id,
         partnerId: session?.partnerId || 'partner-1',
         partnerName: 'Partner A: Srikanth Reddy',
         amount: 500000,
         payoutMode: 'Bank Transfer',
-        accountDetails: 'HDFC A/C: •••• 9842 (IFSC: HDFC0001024)',
+        destinationAccountDetails: 'HDFC A/C: •••• 9842 (IFSC: HDFC0001024)',
         purpose: 'Advance capital draw against Q3 accrued profits',
         requestedAt: '2026-09-24 14:30',
         status: 'approved',
@@ -724,9 +820,11 @@ export const FieldPartnerMobileView: React.FC<FieldPartnerMobileViewProps> = ({
       return;
     }
 
+    const chosenBankAcc = firmAccounts.find((a) => a.id === expenseBankAccountId) || firmAccounts[0];
     const newLog: FieldExpenseLog = {
       id: `exp-${Date.now()}`,
       firmId: activeFirm.id,
+      projectId: activeProject?.id,
       partnerId: currentPartner.id,
       partnerName: currentPartner.name,
       date: new Date().toISOString().split('T')[0],
@@ -739,6 +837,9 @@ export const FieldPartnerMobileView: React.FC<FieldPartnerMobileViewProps> = ({
       enrolledBy: currentPartner.name,
       paymentMode: expensePaymentMode,
       vendorName: expenseVendor.trim() || undefined,
+      paymentSource: expensePaymentSource,
+      bankAccountId: expensePaymentSource === 'project_bank' ? (chosenBankAcc?.id || undefined) : undefined,
+      bankAccountName: expensePaymentSource === 'project_bank' ? (chosenBankAcc ? `${chosenBankAcc.bankName} (${chosenBankAcc.accountNumber.slice(-4)})` : 'Project Bank Account') : 'Partner Individual Funds',
     };
 
     onSubmitExpense(newLog);
@@ -758,13 +859,18 @@ export const FieldPartnerMobileView: React.FC<FieldPartnerMobileViewProps> = ({
       return;
     }
 
+    const chosenSourceAcc = firmAccounts.find((a) => a.id === drawSourceAccountId) || firmAccounts[0];
     const newRequest: DrawingRequest = {
       id: `draw-${Date.now()}`,
+      firmId: activeFirm.id,
+      projectId: activeProject?.id,
       partnerId: currentPartner.id,
       partnerName: currentPartner.name,
       amount: numAmt,
       payoutMode: drawPayoutMode,
-      accountDetails: drawAccountDetails.trim() || 'Firm Registered Bank Account',
+      sourceAccountId: chosenSourceAcc?.id,
+      sourceAccountName: chosenSourceAcc ? `${chosenSourceAcc.bankName} (••••${chosenSourceAcc.accountNumber.slice(-4)})` : 'Project Treasury',
+      destinationAccountDetails: drawDestinationAccountDetails.trim() || 'Partner Registered Bank Account',
       purpose: drawPurpose.trim() || 'Partner capital draw against accrued profit',
       requestedAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
       status: 'pending_approval',
@@ -772,29 +878,78 @@ export const FieldPartnerMobileView: React.FC<FieldPartnerMobileViewProps> = ({
 
     const updated = [newRequest, ...submittedDrawings];
     setSubmittedDrawings(updated);
-    localStorage.setItem(`syndicate_draw_requests_${currentPartner.id}`, JSON.stringify(updated));
-
-    if (onAddAccountTransaction && firmAccounts.length > 0) {
-      const primaryAcc = firmAccounts.find((a) => a.isPrimary) || firmAccounts[0];
-      const newTx: FirmAccountTransaction = {
-        id: `tx-draw-req-${Date.now()}`,
-        accountId: primaryAcc.id,
-        date: new Date().toISOString().split('T')[0],
-        type: 'debit',
-        amount: numAmt,
-        description: `Partner Draw Request: ${currentPartner.name} - ${drawPurpose || 'Capital Draw'}`,
-        category: 'partner_draw',
-        partnerName: currentPartner.name,
-        balanceAfter: primaryAcc.currentBalance - numAmt,
-        status: 'pending',
-        notes: `Payout via ${drawPayoutMode}. Acc: ${drawAccountDetails || 'On File'}`,
-      };
-      onAddAccountTransaction(primaryAcc.id, newTx);
-    }
+    localStorage.setItem(`syndicate_draw_requests_${activeFirm.id}`, JSON.stringify(updated));
 
     setDrawAmount('');
+    setDrawDestinationAccountDetails('');
     setDrawPurpose('');
     showToast(lang === 'te' ? 'డ్రాయింగ్ అభ్యర్థన విజయవంతంగా పంపబడింది!' : 'Drawing request submitted to Syndicate Management!');
+  };
+
+  const handleApproveDrawing = (drawId: string) => {
+    const updated = submittedDrawings.map((d) =>
+      d.id === drawId
+        ? {
+            ...d,
+            status: 'approved' as const,
+            reviewedBy: `${currentPartner.name} (Partner Consensus)`,
+          }
+        : d
+    );
+    setSubmittedDrawings(updated);
+    localStorage.setItem(`syndicate_draw_requests_${activeFirm.id}`, JSON.stringify(updated));
+    showToast('✓ Drawing request approved! Ready for payout disbursement.');
+  };
+
+  const handleDisburseDrawing = (drawId: string) => {
+    const draw = submittedDrawings.find((d) => d.id === drawId);
+    if (!draw || draw.status === 'cleared') return;
+
+    const sourceAcc = firmAccounts.find((a) => a.id === draw.sourceAccountId) || firmAccounts[0];
+    if (sourceAcc && onAddAccountTransaction) {
+      const debitTx: FirmAccountTransaction = {
+        id: `tx-draw-disburse-${Date.now()}`,
+        accountId: sourceAcc.id,
+        date: new Date().toISOString().split('T')[0],
+        type: 'debit',
+        amount: draw.amount,
+        description: `Partner Draw Disbursed: ${draw.partnerName} - ${draw.purpose}`,
+        category: 'partner_draw',
+        partnerName: draw.partnerName,
+        projectName: activeProject?.name || 'Project Venture',
+        balanceAfter: sourceAcc.currentBalance - draw.amount,
+        status: 'approved',
+        paymentMode: draw.payoutMode || 'Bank Transfer',
+        notes: `Paid out to: ${draw.destinationAccountDetails}. Authorized by ${currentPartner.name}.`,
+      };
+      onAddAccountTransaction(sourceAcc.id, debitTx);
+    }
+
+    if (onUpdatePartner) {
+      const targetPartner = partners.find(
+        (p) => String(p.id) === String(draw.partnerId) || p.name.trim().toLowerCase() === draw.partnerName.trim().toLowerCase()
+      );
+      if (targetPartner) {
+        onUpdatePartner({
+          ...targetPartner,
+          drawings: (targetPartner.drawings || 0) + draw.amount,
+        });
+      }
+    }
+
+    const updated = submittedDrawings.map((d) =>
+      d.id === drawId
+        ? {
+            ...d,
+            status: 'cleared' as const,
+            disbursedBy: `${currentPartner.name} (Authorized Disburser)`,
+            disbursedAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
+          }
+        : d
+    );
+    setSubmittedDrawings(updated);
+    localStorage.setItem(`syndicate_draw_requests_${activeFirm.id}`, JSON.stringify(updated));
+    showToast(`✓ Draw of ₹${draw.amount.toLocaleString('en-IN')} disbursed from ${sourceAcc?.bankName || 'Project Account'} to ${draw.partnerName}!`);
   };
 
   // If user is NOT logged in, show Login Gate with language switcher
@@ -843,7 +998,9 @@ export const FieldPartnerMobileView: React.FC<FieldPartnerMobileViewProps> = ({
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              const targetUser = partners.find((p) => p.id === loginPartnerId);
+              const targetUser =
+                partners.find((p) => String(p.id) === String(loginPartnerId)) ||
+                firmAvailableUsers.find((p) => String(p.id) === String(loginPartnerId));
               if (!targetUser) return;
               const expectedPin = targetUser.pinCode || '1234';
               if (loginPin.trim() !== expectedPin) {
@@ -1153,16 +1310,6 @@ export const FieldPartnerMobileView: React.FC<FieldPartnerMobileViewProps> = ({
               {t('liveLedger')}
             </span>
           </button>
-
-          {/* Top Bar Quick Action Callout: + Enroll Investment */}
-          <button
-            type="button"
-            onClick={() => setIsEnrollInvestmentModalOpen(true)}
-            className="ml-auto flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-amber-400 via-[#FFB800] to-amber-500 hover:bg-amber-400 text-gray-950 rounded-2xl font-black text-xs shadow-md transition-all shrink-0 cursor-pointer active:scale-95 border border-amber-600/30"
-          >
-            <Coins className="w-4 h-4 text-gray-950" />
-            <span>{t('enrollInvestmentBtn')}</span>
-          </button>
         </nav>
       </div>
 
@@ -1443,17 +1590,6 @@ export const FieldPartnerMobileView: React.FC<FieldPartnerMobileViewProps> = ({
               </p>
             </div>
 
-            <div className="relative z-10 flex items-center gap-3 shrink-0">
-              <button
-                type="button"
-                onClick={() => setIsEnrollInvestmentModalOpen(true)}
-                className="flex items-center gap-2 px-5 py-3 rounded-2xl bg-gradient-to-r from-amber-400 via-[#FFB800] to-amber-500 hover:bg-amber-400 text-gray-950 font-black text-xs shadow-lg transition-all border border-amber-600/30 cursor-pointer active:scale-95"
-              >
-                <Coins className="w-4 h-4 text-gray-950" />
-                <span>{t('enrollInvestmentBtn')}</span>
-              </button>
-            </div>
-
             {/* Background decoration */}
             <div className="absolute right-0 top-0 w-80 h-full bg-radial from-amber-500/10 to-transparent pointer-events-none" />
           </div>
@@ -1556,16 +1692,6 @@ export const FieldPartnerMobileView: React.FC<FieldPartnerMobileViewProps> = ({
                   Real-time verifiable register of all partner contributions credited to Bank &amp; Cash Treasury.
                 </p>
               </div>
-
-              {/* Direct Enroll Action Button */}
-              <button
-                type="button"
-                onClick={() => setIsEnrollInvestmentModalOpen(true)}
-                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-gray-950 font-black text-xs transition-all shrink-0 cursor-pointer self-start sm:self-center"
-              >
-                <Coins className="w-3.5 h-3.5" />
-                <span>{t('enrollInvestmentBtn')}</span>
-              </button>
             </div>
 
             {/* Filter & Search Toolbar */}
@@ -1893,6 +2019,77 @@ export const FieldPartnerMobileView: React.FC<FieldPartnerMobileViewProps> = ({
               </div>
 
               <form onSubmit={handleExpenseSubmit} className="space-y-3.5 text-xs">
+                {/* Payment Source Toggle: Project Bank vs Individual Personal Pocket */}
+                <div className="bg-amber-50/80 p-3 rounded-2xl border border-amber-300 space-y-2.5">
+                  <label className="block text-[10px] font-black text-amber-950 uppercase tracking-wider flex items-center justify-between">
+                    <span>{lang === 'te' ? 'చెల్లింపు మూలం (ఎవరు చెల్లించారు)' : 'Payment Source (Who Paid Wages / Outlay)'} *</span>
+                    <span className="text-[9px] font-bold text-amber-800">Site Ledger</span>
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setExpensePaymentSource('project_bank')}
+                      className={`py-2 px-2.5 rounded-xl font-black text-[11px] flex items-center justify-center gap-1.5 transition-all cursor-pointer border ${
+                        expensePaymentSource === 'project_bank'
+                          ? 'bg-[#111827] text-white border-gray-900 shadow-sm'
+                          : 'bg-white text-gray-700 border-amber-200 hover:bg-amber-100/50'
+                      }`}
+                    >
+                      <Landmark className="w-3.5 h-3.5 text-amber-400" />
+                      <span>{lang === 'te' ? 'ప్రాజెక్ట్ బ్యాంక్ ఖాతా' : 'Project Bank A/C'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setExpensePaymentSource('individual')}
+                      className={`py-2 px-2.5 rounded-xl font-black text-[11px] flex items-center justify-center gap-1.5 transition-all cursor-pointer border ${
+                        expensePaymentSource === 'individual'
+                          ? 'bg-[#111827] text-white border-gray-900 shadow-sm'
+                          : 'bg-white text-gray-700 border-amber-200 hover:bg-amber-100/50'
+                      }`}
+                    >
+                      <User className="w-3.5 h-3.5 text-amber-400" />
+                      <span>{lang === 'te' ? 'వ్యక్తిగత సొంత నిధులు' : 'Individual / Personal Funds'}</span>
+                    </button>
+                  </div>
+
+                  {expensePaymentSource === 'project_bank' ? (
+                    <div>
+                      <label className="block text-[10px] font-black text-amber-950 uppercase mb-1 flex items-center justify-between">
+                        <span>{lang === 'te' ? 'డెబిట్ చేయవలసిన ప్రాజెక్ట్ బ్యాంక్' : 'Select Project Bank to Debit'} *</span>
+                        {firmAccounts.length > 0 && (
+                          <span className="font-mono text-[9px] text-amber-900 font-bold">
+                            {firmAccounts.find((a) => a.id === expenseBankAccountId)?.bankName || firmAccounts[0]?.bankName}: {formatINR(firmAccounts.find((a) => a.id === expenseBankAccountId)?.currentBalance || firmAccounts[0]?.currentBalance || 0)}
+                          </span>
+                        )}
+                      </label>
+                      <select
+                        value={expenseBankAccountId || firmAccounts[0]?.id || ''}
+                        onChange={(e) => setExpenseBankAccountId(e.target.value)}
+                        className="w-full bg-white border border-amber-300 rounded-xl p-2.5 text-xs font-bold text-gray-950 outline-none focus:ring-2 focus:ring-amber-500"
+                      >
+                        {firmAccounts.length === 0 && (
+                          <option value="">Cash Treasury / Site Vault</option>
+                        )}
+                        {firmAccounts.map((acc) => (
+                          <option key={acc.id} value={acc.id}>
+                            {acc.bankName} - {acc.accountName} (••••{acc.accountNumber.slice(-4)}) — Bal: {formatINR(acc.currentBalance)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : (
+                    <div className="bg-white/90 p-2 rounded-xl border border-amber-200 text-[10px] text-gray-600 space-y-0.5">
+                      <div className="font-bold text-gray-900 flex items-center gap-1">
+                        <User className="w-3 h-3 text-amber-600" />
+                        <span>Paid from {currentPartner.name}&apos;s Personal Pocket</span>
+                      </div>
+                      <p className="text-[9px] text-gray-500">
+                        {lang === 'te' ? 'బ్యాంక్ నిధులు నేరుగా తగ్గవు. భాగస్వామి రీయింబర్స్‌మెంట్ లెడ్జర్‌లో నమోదు అవుతుంది.' : 'Does not drain project bank account. Reconciled in partner reimbursable equity.'}
+                      </p>
+                    </div>
+                  )}
+                </div>
+
                 <div>
                   <label className="block text-[10px] font-black text-gray-700 uppercase mb-1">
                     {t('expenseAmount')} *
@@ -2043,6 +2240,36 @@ export const FieldPartnerMobileView: React.FC<FieldPartnerMobileViewProps> = ({
               </div>
 
               <form onSubmit={handleDrawingSubmit} className="space-y-3.5 text-xs">
+                {/* 1. Debit Source Account */}
+                <div>
+                  <label className="block text-[10px] font-black text-gray-700 uppercase mb-1 flex items-center justify-between">
+                    <span className="flex items-center gap-1">
+                      <Landmark className="w-3.5 h-3.5 text-amber-600" />
+                      <span>{lang === 'te' ? 'డెబిట్ చేయవలసిన ప్రాజెక్ట్ బ్యాంక్ ఖాతా' : 'Request Drawing From (Project Bank Account)'} *</span>
+                    </span>
+                    {firmAccounts.length > 0 && (
+                      <span className="font-mono text-[9px] text-emerald-800 font-bold">
+                        Bal: {formatINR(firmAccounts.find((a) => a.id === drawSourceAccountId)?.currentBalance || firmAccounts[0]?.currentBalance || 0)}
+                      </span>
+                    )}
+                  </label>
+                  <select
+                    value={drawSourceAccountId || firmAccounts[0]?.id || ''}
+                    onChange={(e) => setDrawSourceAccountId(e.target.value)}
+                    className="w-full bg-gray-50 border border-gray-300 rounded-xl p-2.5 text-xs font-bold text-gray-950 outline-none focus:bg-white focus:border-emerald-500 cursor-pointer"
+                  >
+                    {firmAccounts.length === 0 && (
+                      <option value="">Syndicate Primary Escrow Vault</option>
+                    )}
+                    {firmAccounts.map((acc) => (
+                      <option key={acc.id} value={acc.id}>
+                        {acc.bankName} - {acc.accountName} (••••{acc.accountNumber.slice(-4)}) — Bal: {formatINR(acc.currentBalance)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 2. Amount */}
                 <div>
                   <label className="block text-[10px] font-black text-gray-700 uppercase mb-1">
                     {t('drawAmount')} *
@@ -2080,13 +2307,14 @@ export const FieldPartnerMobileView: React.FC<FieldPartnerMobileViewProps> = ({
 
                   <div>
                     <label className="block text-[10px] font-black text-gray-700 uppercase mb-1">
-                      {t('bankAccount')}
+                      {lang === 'te' ? 'లబ్ధిదారు డెస్టినేషన్ బ్యాంక్ ఖాతా వివరాలు' : 'Destination Account Details (A/C / IFSC / UPI)'} *
                     </label>
                     <input
                       type="text"
-                      placeholder="HDFC / SBI A/C or UPI"
-                      value={drawAccountDetails}
-                      onChange={(e) => setDrawAccountDetails(e.target.value)}
+                      required
+                      placeholder="e.g. HDFC A/C 501004... IFSC HDFC0001024 or UPI"
+                      value={drawDestinationAccountDetails}
+                      onChange={(e) => setDrawDestinationAccountDetails(e.target.value)}
                       className="w-full bg-gray-50 border border-gray-300 rounded-xl p-2.5 text-xs text-gray-950 outline-none focus:bg-white"
                     />
                   </div>
@@ -2242,29 +2470,93 @@ export const FieldPartnerMobileView: React.FC<FieldPartnerMobileViewProps> = ({
                 <span className="text-[10px] text-gray-500 font-normal">({submittedDrawings.length})</span>
               </div>
 
-              <div className="divide-y divide-gray-100 max-h-80 overflow-y-auto space-y-2">
+              <div className="divide-y divide-gray-100 max-h-96 overflow-y-auto space-y-2">
                 {submittedDrawings.map((draw) => (
-                  <div key={draw.id} className="pt-2 flex items-center justify-between text-xs gap-3">
-                    <div className="min-w-0">
-                      <div className="font-bold text-gray-900 flex items-center gap-1.5 flex-wrap">
-                        <span className="truncate">{draw.purpose}</span>
-                        <span
-                          className={`text-[9px] px-1.5 py-0.2 rounded-md font-bold uppercase shrink-0 ${
-                            draw.status === 'approved' || draw.status === 'cleared'
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : 'bg-amber-100 text-amber-900'
-                          }`}
-                        >
-                          {draw.status === 'cleared' || draw.status === 'approved' ? t('statusApproved') : t('statusPending')}
-                        </span>
+                  <div key={draw.id} className="pt-2.5 pb-2 flex flex-col gap-1.5 text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="font-bold text-gray-900 flex items-center gap-1.5 flex-wrap">
+                          <span className="truncate">{draw.purpose}</span>
+                          <span
+                            className={`text-[9px] px-1.5 py-0.2 rounded-md font-bold uppercase shrink-0 ${
+                              draw.status === 'cleared'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : draw.status === 'approved'
+                                ? 'bg-blue-100 text-blue-800'
+                                : 'bg-amber-100 text-amber-900'
+                            }`}
+                          >
+                            {draw.status === 'cleared'
+                              ? '✓ Cleared & Disbursed'
+                              : draw.status === 'approved'
+                              ? '✓ Approved (Ready to Pay)'
+                              : '⏳ Pending Signoff'}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-gray-500 flex items-center gap-1.5 flex-wrap mt-0.5">
+                          <span>By: <strong className="text-gray-800">{draw.partnerName}</strong></span>
+                          <span>•</span>
+                          <span>Mode: <strong className="text-gray-700">{draw.payoutMode}</strong></span>
+                          <span>•</span>
+                          <span>{draw.requestedAt}</span>
+                        </div>
                       </div>
-                      <span className="text-[10px] text-gray-500 block truncate mt-0.5">
-                        {draw.requestedAt} • {draw.payoutMode} {draw.accountDetails ? `(${draw.accountDetails})` : ''}
-                      </span>
+                      <strong className="font-mono text-rose-700 text-sm shrink-0">
+                        -{formatINR(draw.amount)}
+                      </strong>
                     </div>
-                    <strong className="font-mono text-rose-700 text-xs shrink-0">
-                      -{formatINR(draw.amount)}
-                    </strong>
+
+                    {/* From & To Account Route */}
+                    <div className="bg-gray-50 p-2 rounded-xl text-[10px] space-y-0.5 text-gray-600 border border-gray-200">
+                      <div>
+                        <span className="font-bold text-gray-700">From Account:</span>{' '}
+                        <span className="font-mono text-gray-900">{draw.sourceAccountName || 'Project Treasury Account'}</span>
+                      </div>
+                      <div>
+                        <span className="font-bold text-gray-700">Destination Beneficiary:</span>{' '}
+                        <span className="font-mono text-gray-900">{draw.destinationAccountDetails || 'Beneficiary Account On File'}</span>
+                      </div>
+                    </div>
+
+                    {/* Authorization & Payout Processing Actions */}
+                    <div className="flex items-center justify-between gap-2 pt-1">
+                      <div className="text-[10px] text-gray-500 italic">
+                        {draw.disbursedBy
+                          ? `Processed by: ${draw.disbursedBy} at ${draw.disbursedAt}`
+                          : draw.reviewedBy
+                          ? `Approved by: ${draw.reviewedBy}`
+                          : 'Awaiting consensus authorization'}
+                      </div>
+
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {draw.status === 'pending_approval' && (
+                          <button
+                            type="button"
+                            onClick={() => handleApproveDrawing(draw.id)}
+                            className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[10px] font-bold cursor-pointer transition-colors shadow-2xs"
+                          >
+                            Approve
+                          </button>
+                        )}
+                        {draw.status !== 'cleared' && (
+                          <button
+                            type="button"
+                            onClick={() => handleDisburseDrawing(draw.id)}
+                            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-black cursor-pointer transition-colors shadow-2xs flex items-center gap-1"
+                            title="Disburse funds and debit the project bank account immediately"
+                          >
+                            <DollarSign className="w-3 h-3" />
+                            <span>Process Payout &amp; Debit A/C</span>
+                          </button>
+                        )}
+                        {draw.status === 'cleared' && (
+                          <span className="text-[10px] font-bold text-emerald-700 flex items-center gap-1">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Debited to Project Statement</span>
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 ))}
 
@@ -2358,7 +2650,14 @@ export const FieldPartnerMobileView: React.FC<FieldPartnerMobileViewProps> = ({
               plots={activePlots}
               apartmentUnits={apartmentUnits}
               partners={partners}
+              individualInvestments={individualInvestments}
               onOpenRecordTransactionModal={() => {}}
+              onOpenEnrollExpenseModal={() => {
+                setActiveTab('expenses_approvals');
+              }}
+              onOpenIndividualInvestmentModal={() => {
+                setIsEnrollInvestmentModalOpen(true);
+              }}
             />
           ) : (
             <div className="bg-white p-8 rounded-3xl border border-gray-200 text-center text-gray-500">

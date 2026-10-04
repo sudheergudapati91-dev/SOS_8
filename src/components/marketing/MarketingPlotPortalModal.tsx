@@ -32,7 +32,6 @@ interface MarketingPlotPortalModalProps {
   floorRate?: number;
   onSubmitProposal: (plotId: number, proposal: MarketingBookingRequest) => void;
   isStandalone?: boolean;
-  onSwitchToStaff?: () => void;
 }
 
 export const MarketingPlotPortalModal: React.FC<MarketingPlotPortalModalProps> = ({
@@ -44,7 +43,6 @@ export const MarketingPlotPortalModal: React.FC<MarketingPlotPortalModalProps> =
   floorRate = 17000,
   onSubmitProposal,
   isStandalone = false,
-  onSwitchToStaff,
 }) => {
   // Agent Identification (remembered for seamless multi-proposal workflow)
   const [agentName, setAgentName] = useState(() => {
@@ -79,7 +77,11 @@ export const MarketingPlotPortalModal: React.FC<MarketingPlotPortalModalProps> =
 
   if (!isOpen) return null;
 
-  const shareableUrl = `${window.location.origin}${window.location.pathname}?portal=marketing&firmId=${encodeURIComponent(firm?.id || '')}&venture=${encodeURIComponent(project?.id || '')}&standalone=true`;
+  let portalOrigin = window.location.origin;
+  if (portalOrigin.includes('ais-dev-')) {
+    portalOrigin = portalOrigin.replace('ais-dev-', 'ais-pre-');
+  }
+  const shareableUrl = `${portalOrigin}${window.location.pathname}?portal=marketing&firmId=${encodeURIComponent(firm?.id || '')}&venture=${encodeURIComponent(project?.id || '')}&standalone=true`;
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(shareableUrl);
@@ -236,17 +238,6 @@ export const MarketingPlotPortalModal: React.FC<MarketingPlotPortalModalProps> =
             <MessageSquare className="w-4 h-4 text-emerald-200" />
             <span className="hidden sm:inline">WhatsApp</span>
           </button>
-
-          {isStandalone && onSwitchToStaff && (
-            <button
-              type="button"
-              onClick={onSwitchToStaff}
-              className="px-3.5 py-2 bg-amber-400 hover:bg-amber-300 text-gray-950 text-xs font-black rounded-xl shadow-md transition-all flex items-center gap-1 cursor-pointer"
-              title="Open SyndicateOS Internal Accounting Console"
-            >
-              <span>👔 Internal Staff Console ↗</span>
-            </button>
-          )}
 
           {!isStandalone && (
             <button

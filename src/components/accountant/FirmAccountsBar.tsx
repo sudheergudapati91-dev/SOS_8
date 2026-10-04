@@ -51,13 +51,13 @@ export const FirmAccountsBar: React.FC<FirmAccountsBarProps> = ({
   const [preselectedAccountId, setPreselectedAccountId] = useState<string | undefined>(undefined);
 
   // Filter accounts belonging strictly to this firm, focused on active project
-  const firmAccounts = accounts.filter((acc) => acc.firmId === firm.id);
+  const firmAccounts = accounts.filter((acc) => !acc.firmId || acc.firmId === firm.id);
   const activeProjectObj = projects.find((p) => p.id === activeProjectId);
 
   // Accounts strictly for this active project
   const projectAccounts = activeProjectId
-    ? firmAccounts.filter((acc) => acc.linkedProjectId === activeProjectId)
-    : [];
+    ? firmAccounts.filter((acc) => !acc.linkedProjectId || acc.linkedProjectId === 'all' || acc.linkedProjectId === activeProjectId)
+    : firmAccounts;
 
   // Filter by selected account type tab
   const displayedAccounts = projectAccounts.filter((acc) => {
@@ -65,11 +65,13 @@ export const FirmAccountsBar: React.FC<FirmAccountsBarProps> = ({
     return acc.accountType === filterType;
   });
 
-  // Calculate liquidity summaries strictly for project accounts
-  const totalLiquidity = projectAccounts.reduce(
-    (sum, acc) => sum + (acc.currentBalance || 0),
-    0
-  );
+  // Calculate separate bank liquidity vs available cash in hand strictly for project
+  const bankAccounts = projectAccounts.filter((a) => a.accountType !== 'field_petty_cash');
+  const bankLiquidityTotal = bankAccounts.reduce((sum, a) => sum + (a.currentBalance || 0), 0);
+  const cashAccounts = projectAccounts.filter((a) => a.accountType === 'field_petty_cash');
+  const availableCashTotal = cashAccounts.reduce((sum, a) => sum + (a.currentBalance || 0), 0);
+  const totalLiquidity = bankLiquidityTotal + availableCashTotal;
+
   const reraEscrowTotal = projectAccounts
     .filter((a) => a.accountType === 'rera_escrow')
     .reduce((sum, a) => sum + (a.currentBalance || 0), 0);
@@ -131,15 +133,26 @@ export const FirmAccountsBar: React.FC<FirmAccountsBarProps> = ({
                 Project Bank Accounts &amp; Treasury
               </h3>
               <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-100 text-amber-950 border border-amber-300">
-                {projectAccounts.length} Project Accounts
+                {projectAccounts.length} Accounts
+              </span>
+              <span className="text-xs text-gray-400">•</span>
+              <span className="text-xs font-semibold text-gray-700 flex items-center gap-1 bg-blue-50 px-2 py-0.5 rounded-lg border border-blue-200">
+                <Landmark className="w-3.5 h-3.5 text-blue-600" />
+                <span>Bank:</span>
+                <strong className="text-blue-900 font-mono">{formatINR(bankLiquidityTotal)}</strong>
+              </span>
+              <span className="text-xs font-semibold text-emerald-800 flex items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200">
+                <Wallet className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Available Cash:</span>
+                <strong className="text-emerald-950 font-mono">{formatINR(availableCashTotal)}</strong>
               </span>
               <span className="text-xs text-gray-400">•</span>
               <span className="text-xs font-semibold text-gray-600">
-                Project Liquidity: <strong className="text-gray-950 font-mono">{formatINR(totalLiquidity)}</strong>
+                Total: <strong className="text-gray-950 font-mono">{formatINR(totalLiquidity)}</strong>
               </span>
             </div>
             <p className="text-xs text-gray-500 mt-0.5">
-              Dedicated statutory RERA escrow ledgers, operational accounts, and capital depositories for{' '}
+              Dedicated statutory RERA escrow ledgers, operational accounts, and site cash vaults for{' '}
               <strong className="text-gray-900">{activeProjectObj ? `${activeProjectObj.name} (${activeProjectObj.code})` : firm.name}</strong>
             </p>
           </div>
@@ -197,7 +210,7 @@ export const FirmAccountsBar: React.FC<FirmAccountsBarProps> = ({
                 { id: 'rera_escrow', label: 'RERA Escrow', count: projectAccounts.filter(a => a.accountType === 'rera_escrow').length },
                 { id: 'syndicate_capital_pool', label: 'Capital Pool', count: projectAccounts.filter(a => a.accountType === 'syndicate_capital_pool').length },
                 { id: 'current_operational', label: 'Commercial Current', count: projectAccounts.filter(a => a.accountType === 'current_operational').length },
-                { id: 'field_petty_cash', label: 'Cash Vaults', count: projectAccounts.filter(a => a.accountType === 'field_petty_cash').length },
+                { id: 'field_petty_cash', label: 'Cash in Hand (Safe Vault)', count: projectAccounts.filter(a => a.accountType === 'field_petty_cash').length },
               ].map((tab) => (
                 <button
                   key={tab.id}
@@ -221,14 +234,19 @@ export const FirmAccountsBar: React.FC<FirmAccountsBarProps> = ({
 
             {/* Statutory Compliance Indicator */}
             <div className="flex items-center gap-3 text-xs text-gray-500 hidden xl:flex">
-              <span className="flex items-center gap-1 text-emerald-700 font-semibold">
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                RERA Escrow: {formatINR(reraEscrowTotal)}
+              <span className="flex items-center gap-1 text-blue-700 font-semibold bg-blue-50 px-2 py-0.5 rounded-lg border border-blue-200">
+                <Landmark className="w-3.5 h-3.5 text-blue-600" />
+                Bank Balance: {formatINR(bankLiquidityTotal)}
+              </span>
+              <span>•</span>
+              <span className="flex items-center gap-1 text-emerald-800 font-semibold bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200">
+                <Wallet className="w-3.5 h-3.5 text-emerald-600" />
+                Available Cash: {formatINR(availableCashTotal)}
               </span>
               <span>•</span>
               <span className="flex items-center gap-1 text-indigo-700 font-semibold">
                 <Coins className="w-3.5 h-3.5" />
-                Partner Capital: {formatINR(syndicateCapitalTotal)}
+                Total Treasury: {formatINR(totalLiquidity)}
               </span>
             </div>
           </div>

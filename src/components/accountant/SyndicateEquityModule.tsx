@@ -81,21 +81,23 @@ export const SyndicateEquityModule: React.FC<SyndicateEquityModuleProps> = ({
   const [addPartnerError, setAddPartnerError] = useState('');
   const [copiedPartnerId, setCopiedPartnerId] = useState<string | null>(null);
 
-  const getPartnerInviteUrl = () => {
+  const getPartnerInviteUrl = (partner?: SyndicatePartner) => {
     if (typeof window !== 'undefined') {
       let origin = window.location.origin;
       if (origin.includes('ais-dev-')) {
         origin = origin.replace('ais-dev-', 'ais-pre-');
       }
-      return `${origin}${window.location.pathname}?role=field_partner&firmId=${firm.id}&standalone=true`;
+      const projParam = project ? `&venture=${encodeURIComponent(project.id)}` : '';
+      const partParam = partner ? `&partnerId=${encodeURIComponent(partner.id)}` : '';
+      return `${origin}${window.location.pathname}?role=field_partner&firmId=${firm.id}${projParam}${partParam}&standalone=true`;
     }
     return '';
   };
 
   const copyPartnerInvite = (partner: SyndicatePartner) => {
-    const portalUrl = getPartnerInviteUrl();
+    const portalUrl = getPartnerInviteUrl(partner);
     const pin = partner.pinCode || '1234';
-    const text = `📱 SyndicateOS Partner Access\n🏢 Firm: ${firm.name} (${firm.code})\n📁 Project: ${project ? `${project.name} (${project.code})` : 'General Venture'}\n👤 Partner: ${partner.name}\n📞 Mobile: ${partner.phone}\n\n🔗 Partner Mobile Portal Link:\n${portalUrl}\n\n🔑 Your Login Security PIN: ${pin}\n\n👉 Instructions: Open the link, select your firm "${firm.name}", select your name "${partner.name}", and enter your PIN (${pin}) to access your real-time equity passbook, verify capital investments, and log field expenses.`;
+    const text = `📱 SyndicateOS Partner Access\n🏢 Firm: ${firm.name} (${firm.code})\n📁 Project: ${project ? `${project.name} (${project.code})` : 'General Venture'}\n👤 Partner: ${partner.name}\n📞 Mobile: ${partner.phone}\n\n🔗 Partner Mobile Portal Link:\n${portalUrl}\n\n🔑 Your Login Security PIN: ${pin}\n\n👉 Instructions: Open the link to directly access your real-time equity passbook for ${project ? project.name : firm.name}, verify capital investments, and log field expenses.`;
     navigator.clipboard.writeText(text);
     setCopiedPartnerId(partner.id);
     setTimeout(() => setCopiedPartnerId(null), 2500);

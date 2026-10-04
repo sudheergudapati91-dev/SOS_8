@@ -33,7 +33,8 @@ import {
   FileCheck2,
   RefreshCw,
   Building,
-  Receipt
+  Receipt,
+  Wallet
 } from 'lucide-react';
 import { formatINR } from '../../utils/formatters';
 
@@ -93,14 +94,16 @@ export const ProjectStatementModule: React.FC<ProjectStatementModuleProps> = ({
   const [dateFilter, setDateFilter] = useState<'all' | 'month' | 'last30' | 'custom'>('all');
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
 
-  // Filter accounts belonging strictly to this project
+  const targetFirmId = firm?.id || project?.firmId;
+
+  // Filter accounts belonging strictly to this project or general firm pool
   const projectAccounts = useMemo(() => {
     return accounts.filter(
       (a) =>
-        a.firmId === firm.id &&
-        (project ? a.linkedProjectId === project.id : false)
+        (!targetFirmId || !a.firmId || a.firmId === targetFirmId) &&
+        (project ? (!a.linkedProjectId || a.linkedProjectId === 'all' || a.linkedProjectId === project.id) : true)
     );
-  }, [accounts, firm.id, project?.id]);
+  }, [accounts, targetFirmId, project?.id]);
 
   // Aggregate all transactions into a unified, normalized transaction list
   const allProjectTransactions: UnifiedProjectTransaction[] = useMemo(() => {
@@ -113,7 +116,9 @@ export const ProjectStatementModule: React.FC<ProjectStatementModuleProps> = ({
           // If transaction is tagged to a specific project, verify match
           if (project && tx.projectName && !tx.projectName.toLowerCase().includes(project.name.toLowerCase()) && !project.name.toLowerCase().includes(tx.projectName.toLowerCase())) {
             // Belongs to another specific project
-            return;
+            if (tx.projectName.trim() && project.name.trim()) {
+              return;
+            }
           }
 
           let catLabel = 'General Banking';
@@ -145,8 +150,8 @@ export const ProjectStatementModule: React.FC<ProjectStatementModuleProps> = ({
             referenceNo: tx.referenceNo || `REF-${acc.bankName.slice(0, 3)}-${tx.id.slice(-4)}`,
             accountName: `${acc.bankName} (${acc.accountNumber.slice(-4)})`,
             accountTypeLabel: accTypeLabel,
-            enrolledBy: tx.enrolledBy || tx.partnerName || `${firm.accountantName} (Accountant)`,
-            approverName: tx.approvedBy || `${firm.managingPartnerName} (Managing Partner)`,
+            enrolledBy: tx.enrolledBy || tx.partnerName || `${firm.accountantName || 'Accountant'} (Accountant)`,
+            approverName: tx.approvedBy || `${firm.managingPartnerName || 'Managing Partner'} (Managing Partner)`,
             status: tx.status || 'approved',
             paymentMode: tx.paymentMode || (acc.accountType === 'field_petty_cash' ? 'Cash' : 'RTGS / NEFT'),
             runningBalance: tx.balanceAfter,
@@ -158,16 +163,28 @@ export const ProjectStatementModule: React.FC<ProjectStatementModuleProps> = ({
 
     // 2. Field & Site Expenses for this project
     const pExpenses = fieldExpenses.filter(
-      (e) => (project ? (!e.projectId || e.projectId === project.id) : true) || e.firmId === firm.id
+      (e) =>
+        (project ? (!e.projectId || e.projectId === project.id) : true) &&
+        (!targetFirmId || !e.firmId || e.firmId === targetFirmId)
     );
     pExpenses.forEach((exp) => {
+      // Prevent duplicate if already captured via bank account transaction
+      const hasBankTx = list.some(
+        (t) =>
+          t.source === 'bank_account' &&
+          t.type === 'debit' &&
+          (t.referenceNo === `EXP-${exp.id.slice(-6).toUpperCase()}` ||
+            (t.amount === exp.amount && t.date === exp.date && t.description.toLowerCase().includes(exp.category.toLowerCase())))
+      );
+      if (hasBankTx) return;
+
       const isApproved = exp.status === 'approved';
       const approver =
         exp.reconciledBy ||
         (exp.approvedByPartners && exp.approvedByPartners.length > 0
           ? exp.approvedByPartners.join(', ')
           : isApproved
-          ? `${firm.managingPartnerName} (Managing Partner)`
+          ? `${firm.managingPartnerName || 'Managing Partner'} (Managing Partner)`
           : 'Pending Managing Partner Signoff');
 
       list.push({
@@ -180,20 +197,20 @@ export const ProjectStatementModule: React.FC<ProjectStatementModuleProps> = ({
         categoryLabel: `Site: ${exp.category}`,
         description: exp.note || `Site field expense voucher for ${exp.category}`,
         referenceNo: `SITE-VOUCH-${exp.id.slice(-6).toUpperCase()}`,
-        accountName: 'Site Petty Cash Treasury',
-        accountTypeLabel: 'Field Imprest Vault',
+        accountName: exp.bankAccountName || 'Site Petty Cash Treasury',
+        accountTypeLabel: exp.paymentSource === 'project_bank' ? 'Project Bank Account' : 'Field Imprest Vault',
         enrolledBy: `${exp.partnerName} (Field Partner)`,
         approverName: approver,
         status: exp.status,
-        paymentMode: 'Cash / Spot Voucher',
+        paymentMode: exp.paymentMode || 'Cash / Spot Voucher',
         notes: exp.taxInvoiceNo ? `GST Invoice #${exp.taxInvoiceNo}` : undefined,
       });
     });
 
     // 3. Customer Plot Booking Advances (if not already recorded in bank txs)
-    const activePlots = plots.filter((p) => project && p.projectId === project.id && p.firmId === firm.id);
+    const activePlots = plots.filter((p) => (project ? p.projectId === project.id : true) && (!targetFirmId || !p.firmId || p.firmId === targetFirmId));
     activePlots.forEach((plt) => {
-      if (plt.advanceReceived && plt.advanceReceived > 0 && (plt.status === 'sold' || plt.status === 'reserved')) {
+      if (plt.advanceReceived && plt.advanceReceived > 0 && plt.status !== 'available') {
         // Prevent duplicate if already listed in bank account transactions
         const hasExisting = list.some(
           (t) => t.amount === plt.advanceReceived && t.description.includes(`Plot #${plt.plotNumber}`)
@@ -213,8 +230,8 @@ export const ProjectStatementModule: React.FC<ProjectStatementModuleProps> = ({
             accountName: primaryAcc ? `${primaryAcc.bankName} (${primaryAcc.accountNumber.slice(-4)})` : 'Pending Bank A/C Setup',
             accountTypeLabel: primaryAcc ? 'Project Bank Account' : 'Customer Advance',
             enrolledBy: 'Sales Liaison Partner',
-            approverName: plt.discountApprovedBy || `${firm.managingPartnerName} (Managing Partner)`,
-            status: plt.status === 'sold' || plt.paymentMilestone === 'Registered & Cleared' ? 'approved' : 'approved',
+            approverName: plt.discountApprovedBy || `${firm.managingPartnerName || 'Managing Partner'} (Managing Partner)`,
+            status: 'approved',
             paymentMode: plt.paymentMode || 'RTGS / Bank Transfer',
             notes: plt.paymentMilestone ? `Stage: ${plt.paymentMilestone}` : undefined,
           });
@@ -223,9 +240,9 @@ export const ProjectStatementModule: React.FC<ProjectStatementModuleProps> = ({
     });
 
     // 4. Customer Apartment Unit Booking Advances
-    const activeUnits = apartmentUnits.filter((u) => project && u.projectId === project.id && u.firmId === firm.id);
+    const activeUnits = apartmentUnits.filter((u) => (project ? u.projectId === project.id : true) && (!targetFirmId || !u.firmId || u.firmId === targetFirmId));
     activeUnits.forEach((unit) => {
-      if (unit.advanceReceived && unit.advanceReceived > 0 && (unit.status === 'booked' || unit.status === 'registered')) {
+      if (unit.advanceReceived && unit.advanceReceived > 0 && unit.status !== 'available') {
         const hasExisting = list.some(
           (t) => t.amount === unit.advanceReceived && t.description.includes(`Unit #${unit.unitNumber}`)
         );
@@ -244,7 +261,7 @@ export const ProjectStatementModule: React.FC<ProjectStatementModuleProps> = ({
             accountName: primaryAcc ? `${primaryAcc.bankName} (${primaryAcc.accountNumber.slice(-4)})` : 'Pending Bank A/C Setup',
             accountTypeLabel: primaryAcc ? 'Project Bank Account' : 'Customer Advance',
             enrolledBy: 'Site Sales Coordinator',
-            approverName: unit.discountApprovedBy || `${firm.managingPartnerName} (Managing Partner)`,
+            approverName: unit.discountApprovedBy || `${firm.managingPartnerName || 'Managing Partner'} (Managing Partner)`,
             status: 'approved',
             paymentMode: 'Bank Transfer / Cheque',
             notes: unit.currentMilestone ? `Milestone: ${unit.currentMilestone}` : undefined,
@@ -253,11 +270,10 @@ export const ProjectStatementModule: React.FC<ProjectStatementModuleProps> = ({
       }
     });
 
-    // 4. Partner Individual Capital Investments (Cash Vaults & Bank)
+    // 5. Partner Individual Capital Investments (Cash Vaults & Bank)
     const pInvestments = (individualInvestments || []).filter(
       (inv) =>
-        inv.status === 'approved' &&
-        (!inv.firmId || inv.firmId === firm.id) &&
+        (!targetFirmId || !inv.firmId || inv.firmId === targetFirmId) &&
         (project ? !inv.projectId || inv.projectId === project.id : true)
     );
     pInvestments.forEach((inv) => {
@@ -282,8 +298,8 @@ export const ProjectStatementModule: React.FC<ProjectStatementModuleProps> = ({
           accountName: inv.accountName || (inv.accountType === 'cash' ? 'Syndicate Cash Safe Vault' : 'Project Bank Account'),
           accountTypeLabel: inv.accountType === 'cash' ? 'Cash Vault Depository' : 'Commercial Escrow / Bank',
           enrolledBy: inv.enrolledBy || `${inv.partnerName} (Partner)`,
-          approverName: inv.approvedBy || `${firm.managingPartnerName || 'Managing Partner'}`,
-          status: 'approved',
+          approverName: inv.approvedBy || (inv.status === 'approved' ? `${firm.managingPartnerName || 'Managing Partner'}` : 'Pending Consortium Signoff'),
+          status: inv.status || 'approved',
           paymentMode: inv.paymentMode || (inv.accountType === 'cash' ? 'Cash' : 'Bank Wire'),
           notes: inv.notes,
         });
@@ -291,7 +307,7 @@ export const ProjectStatementModule: React.FC<ProjectStatementModuleProps> = ({
     });
 
     return list;
-  }, [projectAccounts, fieldExpenses, plots, apartmentUnits, individualInvestments, project, firm]);
+  }, [projectAccounts, fieldExpenses, plots, apartmentUnits, individualInvestments, project, firm, targetFirmId]);
 
   // Apply User-Friendly Top Filters
   const filteredTransactions = useMemo(() => {
@@ -364,15 +380,40 @@ export const ProjectStatementModule: React.FC<ProjectStatementModuleProps> = ({
 
   // Aggregate Metrics for Statement
   const totalInflows = filteredTransactions
-    .filter((t) => t.type === 'credit')
+    .filter((t) => t.type === 'credit' && t.status === 'approved')
     .reduce((sum, t) => sum + t.amount, 0);
 
   const totalOutflows = filteredTransactions
-    .filter((t) => t.type === 'debit')
+    .filter((t) => t.type === 'debit' && t.status === 'approved')
     .reduce((sum, t) => sum + t.amount, 0);
 
   const netCashFlow = totalInflows - totalOutflows;
   const approvedCount = filteredTransactions.filter((t) => t.status === 'approved').length;
+  const pendingCount = filteredTransactions.filter((t) => t.status === 'pending').length;
+
+  const bankAccounts = useMemo(() => {
+    return projectAccounts.filter((a) => a.accountType !== 'field_petty_cash');
+  }, [projectAccounts]);
+
+  const cashAccounts = useMemo(() => {
+    return projectAccounts.filter((a) => a.accountType === 'field_petty_cash');
+  }, [projectAccounts]);
+
+  const totalBankBalance = useMemo(() => {
+    return bankAccounts.reduce((sum, acc) => sum + (acc.currentBalance || 0), 0);
+  }, [bankAccounts]);
+
+  const totalCashBalance = useMemo(() => {
+    const directCash = cashAccounts.reduce((sum, acc) => sum + (acc.currentBalance || 0), 0);
+    const cashCredits = allProjectTransactions
+      .filter((t) => t.type === 'credit' && t.status === 'approved' && (t.paymentMode?.toLowerCase().includes('cash') || t.accountName.toLowerCase().includes('cash') || t.accountTypeLabel.toLowerCase().includes('cash')))
+      .reduce((sum, t) => sum + t.amount, 0);
+    const cashDebits = allProjectTransactions
+      .filter((t) => t.type === 'debit' && t.status === 'approved' && (t.paymentMode?.toLowerCase().includes('cash') || t.accountName.toLowerCase().includes('cash') || t.accountTypeLabel.toLowerCase().includes('cash')))
+      .reduce((sum, t) => sum + t.amount, 0);
+    const netCashTxs = cashCredits - cashDebits;
+    return Math.max(directCash, netCashTxs, 0);
+  }, [cashAccounts, allProjectTransactions]);
 
   // Export to CSV Function
   const handleExportCSV = () => {
@@ -521,9 +562,16 @@ export const ProjectStatementModule: React.FC<ProjectStatementModuleProps> = ({
               </span>
               <span className="text-xs text-gray-500 ml-1">Entries</span>
             </div>
-            <div className="text-[11px] font-semibold text-emerald-700 flex items-center gap-1">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>{approvedCount} Verified &amp; Approved</span>
+            <div className="text-[11px] font-semibold text-emerald-700 flex items-center justify-between">
+              <span className="flex items-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>{approvedCount} Verified &amp; Cleared</span>
+              </span>
+              {pendingCount > 0 && (
+                <span className="px-1.5 py-0.2 bg-amber-100 text-amber-900 border border-amber-300 rounded-full font-bold text-[10px]">
+                  {pendingCount} Pending
+                </span>
+              )}
             </div>
           </div>
 
@@ -539,7 +587,7 @@ export const ProjectStatementModule: React.FC<ProjectStatementModuleProps> = ({
               </span>
             </div>
             <div className="text-[11px] text-emerald-800">
-              Customer advances &amp; partner capital
+              Customer advances, bookings &amp; partner capital
             </div>
           </div>
 
@@ -559,11 +607,14 @@ export const ProjectStatementModule: React.FC<ProjectStatementModuleProps> = ({
             </div>
           </div>
 
-          {/* Card 4: Net Surplus Cash Flow */}
+          {/* Card 4: Net Treasury & Liquid Bank Balance */}
           <div className="bg-amber-50/60 rounded-2xl p-4 border border-amber-200 flex flex-col justify-between">
-            <span className="text-[10px] font-black uppercase tracking-wider text-amber-900 flex items-center gap-1.5">
-              <Coins className="w-4 h-4 text-amber-700" />
-              <span>Net Treasury Balance</span>
+            <span className="text-[10px] font-black uppercase tracking-wider text-amber-900 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <Coins className="w-4 h-4 text-amber-700" />
+                <span>Net Treasury Balance</span>
+              </span>
+              <span className="text-[10px] font-bold text-gray-500">Bank + Cash</span>
             </span>
             <div className="my-2">
               <span
@@ -574,8 +625,57 @@ export const ProjectStatementModule: React.FC<ProjectStatementModuleProps> = ({
                 {netCashFlow >= 0 ? `+${formatINR(netCashFlow)}` : `-${formatINR(Math.abs(netCashFlow))}`}
               </span>
             </div>
-            <div className="text-[11px] font-bold text-amber-900">
-              Across dedicated project escrows
+            <div className="text-[11px] font-bold flex items-center justify-between gap-1 flex-wrap pt-1 border-t border-amber-200/80">
+              <span className="text-blue-800 font-mono flex items-center gap-1">
+                <Landmark className="w-3 h-3 text-blue-600" />
+                <span>Bank: {formatINR(totalBankBalance)}</span>
+              </span>
+              <span className="text-emerald-800 font-mono flex items-center gap-1">
+                <Wallet className="w-3 h-3 text-emerald-600" />
+                <span>Cash: {formatINR(totalCashBalance)}</span>
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Project Bank & Cash Accounts Live Strip */}
+        <div className="mt-4 pt-3.5 border-t border-gray-200/80">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[11px] font-bold text-gray-600 flex items-center gap-1">
+              <Landmark className="w-3.5 h-3.5 text-gray-800" />
+              <span>Project Treasury Strip:</span>
+            </span>
+            {/* Bank Accounts */}
+            {bankAccounts.map((acc) => (
+              <div key={acc.id} className="flex items-center gap-2 bg-blue-50/80 px-3 py-1 rounded-xl border border-blue-200 shadow-2xs text-xs">
+                <Landmark className="w-3.5 h-3.5 text-blue-700" />
+                <span className="font-bold text-gray-900">{acc.bankName}</span>
+                <span className="text-[10px] font-mono text-gray-500">••••{acc.accountNumber.slice(-4)}</span>
+                <span className="font-black text-blue-800 font-mono">{formatINR(acc.currentBalance)}</span>
+              </div>
+            ))}
+            {/* Cash Safe Vault Accounts */}
+            {cashAccounts.map((acc) => (
+              <div key={acc.id} className="flex items-center gap-2 bg-emerald-50/90 px-3 py-1 rounded-xl border border-emerald-300 shadow-2xs text-xs">
+                <Wallet className="w-3.5 h-3.5 text-emerald-700" />
+                <span className="font-bold text-emerald-950">{acc.accountName || 'Cash in Hand (Safe Vault)'}</span>
+                <span className="font-black text-emerald-800 font-mono">{formatINR(acc.currentBalance)}</span>
+              </div>
+            ))}
+            {/* If no separate cash account configured, display the calculated Available Cash in Hand card */}
+            {cashAccounts.length === 0 && (
+              <div className="flex items-center gap-2 bg-emerald-50/90 px-3 py-1 rounded-xl border border-emerald-300 shadow-2xs text-xs">
+                <Wallet className="w-3.5 h-3.5 text-emerald-700" />
+                <span className="font-bold text-emerald-950">Cash in Hand (Safe Vault):</span>
+                <span className="font-black text-emerald-800 font-mono">{formatINR(totalCashBalance)}</span>
+              </div>
+            )}
+            {/* Combined summary pill */}
+            <div className="ml-auto text-[11px] font-bold text-gray-600 hidden md:flex items-center gap-1.5">
+              <span>Total Available Liquid Funds:</span>
+              <span className="font-mono text-gray-950 font-black px-2 py-0.5 bg-gray-100 rounded-lg border border-gray-300">
+                {formatINR(totalBankBalance + totalCashBalance)}
+              </span>
             </div>
           </div>
         </div>
@@ -595,7 +695,7 @@ export const ProjectStatementModule: React.FC<ProjectStatementModuleProps> = ({
             </span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
             {/* Filter 1: Search Box */}
             <div className="lg:col-span-2 relative">
               <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -632,7 +732,22 @@ export const ProjectStatementModule: React.FC<ProjectStatementModuleProps> = ({
               </select>
             </div>
 
-            {/* Filter 3: Category Filter */}
+            {/* Filter 3: Account Type / Vault Filter */}
+            <div>
+              <select
+                id="statement-account-filter"
+                value={accountFilter}
+                onChange={(e) => setAccountFilter(e.target.value)}
+                className="w-full px-3 py-2.5 bg-gray-50 border border-gray-300 rounded-2xl text-xs font-bold text-gray-950 focus:bg-white focus:ring-2 focus:ring-[#FFB800] outline-none cursor-pointer"
+              >
+                <option value="all">All Accounts &amp; Vaults</option>
+                <option value="rera_escrow">🏦 Commercial Bank &amp; Escrow</option>
+                <option value="petty_cash">💵 Cash in Hand &amp; Safe Vaults</option>
+                <option value="operational">Current Operational</option>
+              </select>
+            </div>
+
+            {/* Filter 4: Category Filter */}
             <div>
               <select
                 id="statement-category-filter"
@@ -648,7 +763,7 @@ export const ProjectStatementModule: React.FC<ProjectStatementModuleProps> = ({
               </select>
             </div>
 
-            {/* Filter 4: Approval Status */}
+            {/* Filter 5: Approval Status */}
             <div>
               <select
                 id="statement-status-filter"
@@ -700,6 +815,43 @@ export const ProjectStatementModule: React.FC<ProjectStatementModuleProps> = ({
               >
                 - Outflows ({allProjectTransactions.filter((t) => t.type === 'debit').length})
               </button>
+
+              <span className="text-[11px] text-gray-400 font-semibold ml-2 mr-1">Vault:</span>
+              <button
+                type="button"
+                onClick={() => setAccountFilter('all')}
+                className={`px-2 py-1 rounded-lg font-bold text-[11px] transition-colors ${
+                  accountFilter === 'all'
+                    ? 'bg-gray-900 text-white'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                All
+              </button>
+              <button
+                type="button"
+                onClick={() => setAccountFilter('rera_escrow')}
+                className={`px-2 py-1 rounded-lg font-bold text-[11px] transition-colors flex items-center gap-1 ${
+                  accountFilter === 'rera_escrow'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-blue-50 text-blue-800 hover:bg-blue-100'
+                }`}
+              >
+                <Landmark className="w-3 h-3" />
+                <span>Bank ({allProjectTransactions.filter((t) => !t.paymentMode?.toLowerCase().includes('cash') && !t.accountName.toLowerCase().includes('cash')).length})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setAccountFilter('petty_cash')}
+                className={`px-2 py-1 rounded-lg font-bold text-[11px] transition-colors flex items-center gap-1 ${
+                  accountFilter === 'petty_cash'
+                    ? 'bg-emerald-600 text-white'
+                    : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+                }`}
+              >
+                <Wallet className="w-3 h-3" />
+                <span>Cash in Hand ({allProjectTransactions.filter((t) => t.paymentMode?.toLowerCase().includes('cash') || t.accountName.toLowerCase().includes('cash')).length})</span>
+              </button>
             </div>
 
             <div className="flex items-center gap-2">
@@ -712,12 +864,13 @@ export const ProjectStatementModule: React.FC<ProjectStatementModuleProps> = ({
                 <RefreshCw className="w-3 h-3 text-gray-400" />
               </button>
 
-              {(searchTerm || flowFilter !== 'all' || categoryFilter !== 'all' || statusFilter !== 'all') && (
+              {(searchTerm || flowFilter !== 'all' || categoryFilter !== 'all' || statusFilter !== 'all' || accountFilter !== 'all') && (
                 <button
                   type="button"
                   onClick={() => {
                     setSearchTerm('');
                     setFlowFilter('all');
+                    setAccountFilter('all');
                     setCategoryFilter('all');
                     setStatusFilter('all');
                   }}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Role,
   TenantFirm,
@@ -18,7 +18,8 @@ import {
   FirmAccount,
   FirmAccountTransaction,
   IndividualInvestmentRecord,
-  ProjectPartnerShare
+  ProjectPartnerShare,
+  AuthenticatedAppUser
 } from './types';
 import {
   INITIAL_FIRMS,
@@ -37,6 +38,7 @@ import {
   INITIAL_INDIVIDUAL_INVESTMENTS
 } from './data/initialData';
 import { Header } from './components/Header';
+import { ProductionAuthGate } from './components/auth/ProductionAuthGate';
 import { SuperAdminView } from './components/superadmin/SuperAdminView';
 import { AccountantDashboard } from './components/accountant/AccountantDashboard';
 import { AccountantLoginGate } from './components/accountant/AccountantLoginGate';
@@ -51,6 +53,23 @@ import {
   batchSaveDocuments,
   clearFirestoreCollection
 } from './services/firestoreSync';
+import {
+  fetchErpDataFromSql,
+  saveFirmToSql,
+  deleteFirmFromSql,
+  saveProjectToSql,
+  deleteProjectFromSql,
+  savePlotToSql,
+  saveApartmentUnitToSql,
+  saveFirmAccountToSql,
+  addAccountTransactionToSql,
+  saveProjectExpenseToSql,
+  savePartnerToSql,
+  saveIndividualInvestmentToSql,
+  saveFieldExpenseToSql,
+  addAuditLogToSql,
+  resetSqlData
+} from './services/sqlSync';
 
 // LocalStorage persistence helpers to preserve custom firm sectors, projects, and accounts across refresh
 const STORAGE_PREFIX = 'syndicate_os_v7_';
@@ -149,9 +168,9 @@ function isCleanSlateStored(): boolean {
 
 export default function App() {
   const initialParams = getInitialParams();
-  // If cleanSlate is active OR if the URL targets a specific firm ID, do not initialize with mock demo data
+  // Fresh mode by default: Database starts clean, users create their own firms
   const isFirmTargeted = Boolean(initialParams.firmId);
-  const cleanSlate = isCleanSlateStored() || isFirmTargeted;
+  const cleanSlate = true;
 
   // Standalone tester view mode (locks/hides other roles)
   const [isStandalone, setIsStandalone] = useState<boolean>(initialParams.standalone);
@@ -159,119 +178,66 @@ export default function App() {
   // Marketing & Channel Partner Public Portal Mode
   const [isMarketingPortal, setIsMarketingPortal] = useState<boolean>(() => initialParams.portal === 'marketing');
 
-  // Top Role Navigation state
+  // Top Role Navigation state - defaults to super_admin so user can immediately onboard firms
   const [currentRole, setCurrentRole] = useState<Role>(() => {
     if (initialParams.role) return initialParams.role;
-    if (cleanSlate) return 'super_admin';
-    return 'accountant';
+    return 'super_admin';
   });
 
-  // Multi-Tenant Platform State (Persisted across browser refresh)
-  const [firms, setFirms] = useState<TenantFirm[]>(() => {
-    if (cleanSlate) {
-      return getStoredState<TenantFirm[]>('firms', []);
-    }
-    const stored = getStoredState<TenantFirm[]>('firms', INITIAL_FIRMS);
-    return stored.map((f) => {
-      // Ensure firm-1 is aligned strictly to Open Plotting only, stripping any lingering construction sector
-      if (f.id === 'firm-1') {
-        return {
-          ...f,
-          sectors: f.sectors.filter((s) => s !== 'real_estate_construction'),
-          featureFlags: {
-            ...f.featureFlags,
-            enableApartmentMatrix: false,
-          },
-        };
-      }
-      // For any firm: if enableApartmentMatrix flag is false, ensure real_estate_construction is removed from sectors
-      if (f.featureFlags?.enableApartmentMatrix === false) {
-        return {
-          ...f,
-          sectors: f.sectors.filter((s) => s !== 'real_estate_construction'),
-        };
-      }
-      // For any firm: if real_estate_construction is not in sectors, ensure enableApartmentMatrix is false
-      if (!f.sectors.includes('real_estate_construction')) {
-        return {
-          ...f,
-          featureFlags: {
-            ...f.featureFlags,
-            enableApartmentMatrix: false,
-          },
-        };
-      }
-      return f;
-    });
-  });
-  const [selectedFirmId, setSelectedFirmId] = useState<string>(() => {
-    if (initialParams.firmId) return initialParams.firmId;
-    if (cleanSlate) return getStoredState('selectedFirmId', '');
-    return getStoredState('selectedFirmId', INITIAL_FIRMS[0].id);
-  });
+  // Multi-Tenant Platform State (Persisted directly in Cloud SQL PostgreSQL)
+  const [firms, setFirms] = useState<TenantFirm[]>(() => []);
+  const [selectedFirmId, setSelectedFirmId] = useState<string>(() => initialParams.firmId || '');
 
-  // Project Ventures State (Projects and partners vary per firm/venture)
-  const [projects, setProjects] = useState<Project[]>(() => {
-    if (cleanSlate) {
-      return getStoredState<Project[]>('projects', []);
-    }
-    const stored = getStoredState<Project[]>('projects', INITIAL_PROJECTS);
-    return stored.map((p) => {
-      if (p.firmId === 'firm-1' && p.sector === 'real_estate_construction') {
-        return { ...p, sector: 'real_estate_open_plotting' as const };
-      }
-      if (p.id === 'proj-avv-2' && p.firmId === 'firm-1') {
-        return { ...p, firmId: 'firm-5' };
-      }
-      return p;
-    });
-  });
-  const [selectedProjectId, setSelectedProjectId] = useState<string>(() => {
-    const stored = getStoredState<string | null>('selectedProjectId', null);
-    if (stored) return stored;
-    if (cleanSlate) return '';
-    const firmProjects = INITIAL_PROJECTS.filter((p) => p.firmId === INITIAL_FIRMS[0].id && p.sector === 'real_estate_open_plotting');
-    return firmProjects[0]?.id || INITIAL_PROJECTS[0]?.id || 'proj-avv-1';
-  });
+  // Project Ventures State (Stored in Cloud SQL)
+  const [projects, setProjects] = useState<Project[]>(() => []);
+  const [selectedProjectId, setSelectedProjectId] = useState<string>(() => initialParams.venture || '');
 
   // Dual Ledger Mode: "internal_syndicate" vs "official_tax"
   const [ledgerMode, setLedgerMode] = useState<LedgerMode>('internal_syndicate');
 
-  // Sector A: Open Plotting Data
-  const [plots, setPlots] = useState<Plot[]>(() => {
-    const raw = cleanSlate ? getStoredState('plots', []) : getStoredState('plots', INITIAL_PLOTS);
-    return sanitizePlotsList(raw);
-  });
-  const [layoutCalc, setLayoutCalc] = useState<LayoutCalculation>(() =>
-    cleanSlate
-      ? { totalExtentValue: 0, unit: 'Acres', roadWidth: 30, openSpacePercent: 10, floorRatePerSqYard: 0 }
-      : INITIAL_LAYOUT_CALC
-  );
-  const [projectExpenses, setProjectExpenses] = useState<ProjectExpense[]>(() =>
-    cleanSlate ? [] : INITIAL_PROJECT_EXPENSES
-  );
+  // Sector A: Open Plotting Data (Stored in Cloud SQL)
+  const [plots, setPlots] = useState<Plot[]>(() => []);
+  const [layoutCalc, setLayoutCalc] = useState<LayoutCalculation>(() => ({
+    totalExtentValue: 0,
+    unit: 'Acres',
+    roadWidth: 30,
+    openSpacePercent: 10,
+    floorRatePerSqYard: 0,
+  }));
+  const [projectExpenses, setProjectExpenses] = useState<ProjectExpense[]>(() => []);
 
-  // Sector B: Apartment Construction Data
-  const [apartmentUnits, setApartmentUnits] = useState<ApartmentUnit[]>(() => {
-    const raw = cleanSlate ? getStoredState('apartmentUnits', []) : getStoredState('apartmentUnits', INITIAL_APARTMENT_UNITS);
-    return sanitizeUnitsList(raw);
-  });
+  // Sector B: Apartment Construction Data (Stored in Cloud SQL)
+  const [apartmentUnits, setApartmentUnits] = useState<ApartmentUnit[]>(() => []);
   const [pricingMatrix, setPricingMatrix] = useState<ApartmentPricingMatrix>(INITIAL_PRICE_MATRIX);
 
-  // Syndicate Capital & Dynamic Equity
-  const [partners, setPartners] = useState<SyndicatePartner[]>(() =>
-    cleanSlate ? getStoredState('partners', []) : getStoredState('partners', INITIAL_PARTNERS)
-  );
+  // Syndicate Capital & Dynamic Equity (Stored in Cloud SQL)
+  const [partners, setPartners] = useState<SyndicatePartner[]>(() => []);
   const [splitMode, setSplitMode] = useState<EquitySplitMode>('fixed');
-  const [fieldExpenses, setFieldExpenses] = useState<FieldExpenseLog[]>(() =>
-    cleanSlate ? getStoredState('fieldExpenses', []) : getStoredState('fieldExpenses', INITIAL_FIELD_EXPENSES)
-  );
+  const [fieldExpenses, setFieldExpenses] = useState<FieldExpenseLog[]>(() => []);
+
+  // Production Authenticated User (Super Admin / Accountant / Partner)
+  const [currentUser, setCurrentUser] = useState<AuthenticatedAppUser | null>(() => {
+    try {
+      const saved = localStorage.getItem('syndicate_production_auth_session');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return null;
+  });
 
   // Field Partner Authenticated Session (Scoped strictly to chosen firm)
   const [fieldPartnerSession, setFieldPartnerSession] = useState<{
     firmId: string;
     partnerId: string;
   } | null>(() => {
+    try {
+      const saved = localStorage.getItem('syndicate_production_auth_session');
+      if (saved) {
+        const u = JSON.parse(saved);
+        if ((u.role === 'field_partner' || u.role === 'managing_partner') && u.firmId && u.partnerId) {
+          return { firmId: u.firmId, partnerId: u.partnerId };
+        }
+      }
+    } catch {}
     if (initialParams.firmId && initialParams.partnerId) {
       return { firmId: initialParams.firmId, partnerId: initialParams.partnerId };
     }
@@ -283,10 +249,15 @@ export default function App() {
     firmId: string;
     accountantName: string;
   } | null>(() => {
-    // If opening via standalone tester link (?standalone=true), require explicit login
-    if (initialParams.standalone) {
-      return null;
-    }
+    try {
+      const saved = localStorage.getItem('syndicate_production_auth_session');
+      if (saved) {
+        const u = JSON.parse(saved);
+        if (u.role === 'accountant' && u.firmId) {
+          return { firmId: u.firmId, accountantName: u.name };
+        }
+      }
+    } catch {}
     try {
       const saved = sessionStorage.getItem('syndicate_accountant_session');
       if (saved) {
@@ -299,97 +270,170 @@ export default function App() {
     return null;
   });
 
-  // Immutable Audit Logs & Compliance Trail
-  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>(() =>
-    cleanSlate ? getStoredState('auditLogs', []) : getStoredState('auditLogs', INITIAL_AUDIT_LOGS)
-  );
+  const handleLoginSuccess = (user: AuthenticatedAppUser) => {
+    setCurrentUser(user);
+    try {
+      localStorage.setItem('syndicate_production_auth_session', JSON.stringify(user));
+    } catch {}
+
+    if (user.role === 'super_admin') {
+      setCurrentRole('super_admin');
+    } else if (user.role === 'accountant') {
+      setCurrentRole('accountant');
+      if (user.firmId) {
+        setSelectedFirmId(user.firmId);
+        const session = { firmId: user.firmId, accountantName: user.name };
+        setAccountantSession(session);
+        try {
+          sessionStorage.setItem('syndicate_accountant_session', JSON.stringify(session));
+        } catch {}
+      }
+    } else {
+      setCurrentRole('field_partner');
+      if (user.firmId && user.partnerId) {
+        setSelectedFirmId(user.firmId);
+        setFieldPartnerSession({
+          firmId: user.firmId,
+          partnerId: user.partnerId,
+        });
+      }
+    }
+    showToast(`✓ Welcome, ${user.name}! Authenticated into your dashboard.`);
+  };
+
+  const handleSignOut = () => {
+    try {
+      localStorage.removeItem('syndicate_production_auth_session');
+      sessionStorage.clear();
+    } catch {}
+    setCurrentUser(null);
+    setAccountantSession(null);
+    setFieldPartnerSession(null);
+    showToast('Signed out of session.');
+  };
+
+  // Immutable Audit Logs & Compliance Trail (Stored in Cloud SQL)
+  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>(() => []);
 
   // Sector C: Liquor Vends Settlements & Partner Stock Draws
-  const [liquorSettlements, setLiquorSettlements] = useState<LiquorDailySettlement[]>(() =>
-    cleanSlate ? [] : INITIAL_LIQUOR_SETTLEMENTS
-  );
-  const [partnerStockDraws, setPartnerStockDraws] = useState<PartnerStockDraw[]>(() =>
-    cleanSlate ? [] : INITIAL_PARTNER_STOCK_DRAWS
-  );
+  const [liquorSettlements, setLiquorSettlements] = useState<LiquorDailySettlement[]>(() => []);
+  const [partnerStockDraws, setPartnerStockDraws] = useState<PartnerStockDraw[]>(() => []);
 
-  // Project Bank Accounts & Multi-Bank Treasury Ledgers
-  const [firmAccounts, setFirmAccounts] = useState<FirmAccount[]>(() =>
-    cleanSlate ? getStoredState('firmAccounts', []) : getStoredState('firmAccounts', INITIAL_FIRM_ACCOUNTS)
-  );
+  // Project Bank Accounts & Multi-Bank Treasury Ledgers (Stored in Cloud SQL)
+  const [firmAccounts, setFirmAccounts] = useState<FirmAccount[]>(() => []);
 
-  // Individual Partner Investments (Dual Cash & Bank Contributions)
-  const [individualInvestments, setIndividualInvestments] = useState<IndividualInvestmentRecord[]>(() =>
-    cleanSlate
-      ? getStoredState('individualInvestments', [])
-      : getStoredState('individualInvestments', INITIAL_INDIVIDUAL_INVESTMENTS)
-  );
+  // Individual Partner Investments (Dual Cash & Bank Contributions - Stored in Cloud SQL)
+  const [individualInvestments, setIndividualInvestments] = useState<IndividualInvestmentRecord[]>(() => []);
 
-  // Synchronize state changes to URL query parameters for direct sharing
+  // Clean address bar: No internal role or firm query parameters exposed to testers
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
       const url = new URL(window.location.href);
-      url.searchParams.set('role', currentRole);
-      if (selectedFirmId) {
-        url.searchParams.set('firmId', selectedFirmId);
-      } else {
+      if (url.searchParams.has('role') || url.searchParams.has('firmId') || url.searchParams.has('standalone')) {
+        url.searchParams.delete('role');
         url.searchParams.delete('firmId');
-      }
-      if (isStandalone) {
-        url.searchParams.set('standalone', 'true');
-      } else {
         url.searchParams.delete('standalone');
+        window.history.replaceState({}, '', url.pathname);
       }
-      window.history.replaceState({}, '', url.toString());
     } catch {
       // Ignore URL sync errors
     }
-  }, [currentRole, selectedFirmId, isStandalone]);
+  }, []);
 
-  // Synchronize state changes to localStorage
+  // One-time startup sweep: Purge any legacy browser localStorage cache so that the Cloud SQL database is the sole source of truth
   useEffect(() => {
-    setStoredState('firms', firms);
-  }, [firms]);
+    try {
+      const keys = [
+        'firms', 'selectedFirmId', 'projects', 'selectedProjectId',
+        'firmAccounts', 'plots', 'apartmentUnits', 'partners',
+        'fieldExpenses', 'auditLogs', 'individualInvestments', 'clean_slate'
+      ];
+      keys.forEach((k) => localStorage.removeItem(STORAGE_PREFIX + k));
+    } catch {}
+  }, []);
 
+  // Initial and reactive load from Cloud SQL PostgreSQL database
   useEffect(() => {
-    setStoredState('selectedFirmId', selectedFirmId);
-  }, [selectedFirmId]);
+    let isMounted = true;
+    async function loadFromCloudSql() {
+      try {
+        const sqlData = await fetchErpDataFromSql();
+        if (!isMounted || !sqlData) return;
+        const cloudFirms = sqlData.firms || [];
+        setFirms(cloudFirms);
+        if (cloudFirms.length > 0) {
+          if (initialParams.firmId && cloudFirms.some((f) => f.id === initialParams.firmId)) {
+            setSelectedFirmId(initialParams.firmId);
+          } else {
+            setSelectedFirmId((prev) => (prev && cloudFirms.some((f) => f.id === prev) ? prev : cloudFirms[0].id));
+          }
+        } else {
+          setSelectedFirmId('');
+        }
 
-  useEffect(() => {
-    setStoredState('projects', projects);
-  }, [projects]);
+        const cloudProjects = sqlData.projects || [];
+        setProjects(cloudProjects);
+        if (cloudProjects.length > 0) {
+          if (initialParams.venture && cloudProjects.some((p) => p.id === initialParams.venture)) {
+            setSelectedProjectId(initialParams.venture);
+          } else {
+            setSelectedProjectId((prev) => (prev && cloudProjects.some((p) => p.id === prev) ? prev : cloudProjects[0].id));
+          }
+        } else {
+          setSelectedProjectId('');
+        }
 
-  useEffect(() => {
-    setStoredState('selectedProjectId', selectedProjectId);
-  }, [selectedProjectId]);
+        setPlots(sqlData.plots || []);
+        setApartmentUnits(sqlData.apartmentUnits || []);
+        setFirmAccounts(sqlData.firmAccounts || []);
+        setProjectExpenses(sqlData.projectExpenses || []);
+        
+        const cloudPartners = [...(sqlData.partners || [])];
+        const existingPartnerIds = new Set(cloudPartners.map((p) => p.id));
+        const existingPartnerNames = new Set(cloudPartners.map((p) => p.name.trim().toLowerCase()));
 
-  useEffect(() => {
-    setStoredState('firmAccounts', firmAccounts);
-  }, [firmAccounts]);
-
-  useEffect(() => {
-    setStoredState('individualInvestments', individualInvestments);
-  }, [individualInvestments]);
-
-  useEffect(() => {
-    setStoredState('plots', plots);
-  }, [plots]);
-
-  useEffect(() => {
-    setStoredState('apartmentUnits', apartmentUnits);
-  }, [apartmentUnits]);
-
-  useEffect(() => {
-    setStoredState('partners', partners);
-  }, [partners]);
-
-  useEffect(() => {
-    setStoredState('fieldExpenses', fieldExpenses);
-  }, [fieldExpenses]);
-
-  useEffect(() => {
-    setStoredState('auditLogs', auditLogs);
-  }, [auditLogs]);
+        // Also harvest any partners registered directly inside projects
+        (sqlData.projects || []).forEach((proj) => {
+          (proj.partners || []).forEach((ps: any) => {
+            if (!existingPartnerIds.has(ps.partnerId) && !existingPartnerNames.has(ps.name.trim().toLowerCase())) {
+              existingPartnerIds.add(ps.partnerId);
+              existingPartnerNames.add(ps.name.trim().toLowerCase());
+              const harvestedPartner: SyndicatePartner = {
+                id: ps.partnerId,
+                firmId: proj.firmId,
+                name: ps.name,
+                phone: ps.phone || '+91 ',
+                roleDescription: ps.roleInProject || 'Investor Partner',
+                avatarColor: ps.avatarColor || 'bg-indigo-600',
+                initialCapital: ps.initialCapital || 0,
+                actualInvested: ps.actualInvested || 0,
+                fixedEquityPercent: ps.equityPercent || 0,
+                drawings: ps.drawings || 0,
+                shareOfFieldExpenses: ps.shareOfFieldExpenses || 0,
+                userRole: ps.roleInProject?.toLowerCase().includes('managing') ? 'managing_partner' : 'field_partner',
+                userStatus: 'active',
+                pinCode: '1234',
+                dailySpendingLimit: 50000,
+              };
+              cloudPartners.push(harvestedPartner);
+              savePartnerToSql(harvestedPartner);
+            }
+          });
+        });
+        setPartners(cloudPartners);
+        setIndividualInvestments(sqlData.individualInvestments || []);
+        setFieldExpenses(sqlData.fieldExpenses || []);
+        setAuditLogs(sqlData.auditLogs || []);
+      } catch (err) {
+        console.error('Failed to load ERP state from Cloud SQL:', err);
+      }
+    }
+    loadFromCloudSql();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   // Real-time Firestore Cloud Synchronization across multiple devices / locations
   useEffect(() => {
@@ -423,60 +467,124 @@ export default function App() {
     });
 
     const unsubFirms = subscribeToCollection<TenantFirm>('firms', (cloudFirms) => {
-      setFirms(cloudFirms);
-      if (cloudFirms.length > 0) {
+      if (cloudFirms && cloudFirms.length > 0) {
+        setFirms((prev) => {
+          const merged = [...prev];
+          cloudFirms.forEach((cf) => {
+            const idx = merged.findIndex((f) => f.id === cf.id);
+            if (idx >= 0) merged[idx] = { ...merged[idx], ...cf };
+            else merged.push(cf);
+          });
+          return merged;
+        });
         setSelectedFirmId((prev) => {
           if (initialParams.firmId && cloudFirms.some((f) => f.id === initialParams.firmId)) {
             return initialParams.firmId;
           }
           return prev && cloudFirms.some((f) => f.id === prev) ? prev : cloudFirms[0].id;
         });
-      } else if (!hasLoadedFirms && !cleanSlate && !isCleanSlateActive) {
-        // Initial seed to Firestore ONLY if cloud is brand new and not in clean slate mode
-        batchSaveDocuments('firms', INITIAL_FIRMS);
-        batchSaveDocuments('projects', INITIAL_PROJECTS);
-        batchSaveDocuments('partners', INITIAL_PARTNERS);
-        batchSaveDocuments('firmAccounts', INITIAL_FIRM_ACCOUNTS);
-        batchSaveDocuments('plots', INITIAL_PLOTS);
-        batchSaveDocuments('apartmentUnits', INITIAL_APARTMENT_UNITS);
-        batchSaveDocuments('individualInvestments', INITIAL_INDIVIDUAL_INVESTMENTS);
       }
       hasLoadedFirms = true;
     });
 
     const unsubProjects = subscribeToCollection<Project>('projects', (cloudProjects) => {
-      setProjects(cloudProjects);
+      if (cloudProjects && cloudProjects.length > 0) {
+        setProjects((prev) => {
+          const merged = [...prev];
+          cloudProjects.forEach((cp) => {
+            const idx = merged.findIndex((p) => p.id === cp.id);
+            if (idx >= 0) merged[idx] = { ...merged[idx], ...cp };
+            else merged.push(cp);
+          });
+          return merged;
+        });
+        if (initialParams.venture && cloudProjects.some((p) => p.id === initialParams.venture)) {
+          setSelectedProjectId(initialParams.venture);
+        }
+      }
     });
 
     const unsubPartners = subscribeToCollection<SyndicatePartner>('partners', (cloudPartners) => {
-      setPartners(cloudPartners);
+      if (cloudPartners && cloudPartners.length > 0) {
+        setPartners((prev) => {
+          const merged = [...cloudPartners];
+          const seenIds = new Set(merged.map((p) => String(p.id)));
+          const seenNames = new Set(merged.map((p) => p.name.trim().toLowerCase()));
+          prev.forEach((p) => {
+            if (!seenIds.has(String(p.id)) && !seenNames.has(p.name.trim().toLowerCase())) {
+              merged.push(p);
+              seenIds.add(String(p.id));
+              seenNames.add(p.name.trim().toLowerCase());
+            }
+          });
+          return merged;
+        });
+      }
     });
 
     const unsubAccounts = subscribeToCollection<FirmAccount>('firmAccounts', (cloudAccounts) => {
-      setFirmAccounts(cloudAccounts);
+      if (!cloudAccounts || cloudAccounts.length === 0) return;
+      setFirmAccounts((prev) => {
+        const merged = [...prev];
+        cloudAccounts.forEach((ca) => {
+          const idx = merged.findIndex((a) => a.id === ca.id);
+          if (idx >= 0) {
+            const prevTxns = merged[idx].recentTransactions || [];
+            const caTxns = ca.recentTransactions || [];
+            const txMap = new Map<string, FirmAccountTransaction>();
+            prevTxns.forEach((t) => txMap.set(t.id, t));
+            caTxns.forEach((t) => txMap.set(t.id, t));
+            const allTx = Array.from(txMap.values()).sort(
+              (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+            );
+            const totalCreds = allTx.filter((t) => t.type === 'credit' && t.status !== 'pending').reduce((s, t) => s + (Number(t.amount) || 0), 0);
+            const totalDebs = allTx.filter((t) => t.type === 'debit' && t.status !== 'pending').reduce((s, t) => s + (Number(t.amount) || 0), 0);
+            const bal = (Number(merged[idx].openingBalance) || 0) + totalCreds - totalDebs;
+            merged[idx] = {
+              ...merged[idx],
+              ...ca,
+              currentBalance: allTx.length > 0 ? bal : (ca.currentBalance ?? merged[idx].currentBalance),
+              recentTransactions: allTx,
+            };
+          } else {
+            merged.push(ca);
+          }
+        });
+        return merged;
+      });
     });
 
     const unsubInvestments = subscribeToCollection<IndividualInvestmentRecord>(
       'individualInvestments',
       (cloudInvestments) => {
-        setIndividualInvestments(cloudInvestments);
+        if (cloudInvestments && cloudInvestments.length > 0) {
+          setIndividualInvestments(cloudInvestments);
+        }
       }
     );
 
     const unsubExpenses = subscribeToCollection<FieldExpenseLog>('fieldExpenses', (cloudExpenses) => {
-      setFieldExpenses(cloudExpenses);
+      if (cloudExpenses && cloudExpenses.length > 0) {
+        setFieldExpenses(cloudExpenses);
+      }
     });
 
     const unsubPlots = subscribeToCollection<Plot>('plots', (cloudPlots) => {
-      setPlots(sanitizePlotsList(cloudPlots));
+      if (cloudPlots && cloudPlots.length > 0) {
+        setPlots(sanitizePlotsList(cloudPlots));
+      }
     });
 
     const unsubUnits = subscribeToCollection<ApartmentUnit>('apartmentUnits', (cloudUnits) => {
-      setApartmentUnits(sanitizeUnitsList(cloudUnits));
+      if (cloudUnits && cloudUnits.length > 0) {
+        setApartmentUnits(sanitizeUnitsList(cloudUnits));
+      }
     });
 
     const unsubAudit = subscribeToCollection<AuditLogEntry>('auditLogs', (cloudAudit) => {
-      setAuditLogs(cloudAudit);
+      if (cloudAudit && cloudAudit.length > 0) {
+        setAuditLogs(cloudAudit);
+      }
     });
 
     return () => {
@@ -494,8 +602,9 @@ export default function App() {
   }, []);
 
   const handleAddFirmAccount = (newAccount: FirmAccount) => {
-    setFirmAccounts((prev) => [newAccount, ...prev]);
+    setFirmAccounts((prev) => [newAccount, ...prev.filter((a) => a.id !== newAccount.id)]);
     saveDocument('firmAccounts', newAccount.id, newAccount);
+    saveFirmAccountToSql(newAccount);
     recordAudit(
       'FIRM_ACCOUNT_REGISTERED',
       `Registered new ${newAccount.accountType.replace('_', ' ').toUpperCase()} account "${newAccount.accountName}" (${newAccount.bankName} - A/C ${newAccount.accountNumber}) with initial ledger balance of ₹${newAccount.openingBalance.toLocaleString('en-IN')}.`,
@@ -509,65 +618,78 @@ export default function App() {
       prev.map((acc) => (acc.id === updatedAccount.id ? updatedAccount : acc))
     );
     saveDocument('firmAccounts', updatedAccount.id, updatedAccount);
+    saveFirmAccountToSql(updatedAccount);
   };
 
   const handleAddAccountTransaction = (accountId: string, tx: FirmAccountTransaction) => {
-    let updatedAccountToSave: FirmAccount | null = null;
-    setFirmAccounts((prev) => {
-      const existing = prev.find((a) => a.id === accountId);
-      if (existing) {
-        return prev.map((acc) => {
-          if (acc.id !== accountId) return acc;
-          const newBalance =
-            tx.type === 'credit'
-              ? acc.currentBalance + tx.amount
-              : acc.currentBalance - tx.amount;
-          const updated: FirmAccount = {
-            ...acc,
-            currentBalance: newBalance,
-            recentTransactions: [
-              { ...tx, balanceAfter: newBalance },
-              ...(acc.recentTransactions || []),
-            ],
-          };
-          updatedAccountToSave = updated;
-          return updated;
-        });
-      } else {
-        // Auto-provision cash vault or capital account if it doesn't exist
-        const newBalance = tx.type === 'credit' ? tx.amount : -tx.amount;
-        const newAccount: FirmAccount = {
+    // 1. Locate or construct the target account
+    const existing = firmAccounts.find((a) => a.id === accountId);
+    const existingTxns: FirmAccountTransaction[] = existing?.recentTransactions || [];
+    const filteredTxns = existingTxns.filter((t) => t.id !== tx.id);
+
+    // 2. Compute accurate balance from opening balance and all verified transactions
+    const candidateTxns = [tx, ...filteredTxns];
+    const totalCredits = candidateTxns
+      .filter((t) => t.type === 'credit' && t.status !== 'pending')
+      .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+    const totalDebits = candidateTxns
+      .filter((t) => t.type === 'debit' && t.status !== 'pending')
+      .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+    
+    const openingBal = existing ? (Number(existing.openingBalance) || 0) : 0;
+    const accurateBalance = openingBal + totalCredits - totalDebits;
+
+    const txWithBalance: FirmAccountTransaction = {
+      ...tx,
+      balanceAfter: accurateBalance,
+    };
+    const finalTxns = [txWithBalance, ...filteredTxns];
+
+    const targetAccount: FirmAccount = existing
+      ? {
+          ...existing,
+          currentBalance: accurateBalance,
+          recentTransactions: finalTxns,
+        }
+      : {
           id: accountId,
-          firmId: selectedFirmId,
+          firmId: selectedFirmId || currentFirm?.id || '',
           linkedProjectId: selectedProjectId,
-          accountName: accountId.includes('cash') ? 'Syndicate Cash Vault & Capital Treasury' : 'Syndicate Capital Pool Account',
-          bankName: accountId.includes('cash') ? 'Cash in Hand (Safe Vault)' : 'Treasury Depository',
-          accountNumber: accountId.includes('cash') ? 'CASH-VAULT-01' : 'POOL-CAP-01',
-          accountType: accountId.includes('cash') ? 'field_petty_cash' : 'syndicate_capital_pool',
-          ifscCode: 'VAULT0001',
+          accountName: accountId.includes('cash') ? 'Project Cash Safe Vault & Imprest' : 'Syndicate Capital Pool Account',
+          bankName: accountId.includes('cash') ? 'Cash in Hand (Safe Vault)' : 'Commercial Bank Account',
+          accountNumber: accountId.includes('cash') ? 'CASH-VAULT-01' : 'BANK-ACC-01',
+          accountType: accountId.includes('cash') ? 'field_petty_cash' : 'rera_escrow',
+          ifscCode: accountId.includes('cash') ? 'CASH0000001' : 'BANK0001',
           branchName: 'Main Site / Registered Office',
           city: 'Amaravati / Regional Hub',
           isPrimary: false,
           status: 'active',
           authorizedSignatories: [currentFirm?.managingPartnerName || 'Managing Partner'],
           createdDate: new Date().toISOString().split('T')[0],
-          currentBalance: newBalance,
+          currentBalance: accurateBalance,
           openingBalance: 0,
           notes: 'Auto-provisioned syndicate depository for partner capital inflows and disbursements.',
-          recentTransactions: [
-            { ...tx, balanceAfter: newBalance },
-          ],
+          recentTransactions: finalTxns,
         };
-        updatedAccountToSave = newAccount;
-        return [newAccount, ...prev];
+
+    // 3. Update React state immediately
+    setFirmAccounts((prev) => {
+      const existsInPrev = prev.some((a) => a.id === accountId);
+      if (existsInPrev) {
+        return prev.map((a) => (a.id === accountId ? targetAccount : a));
+      } else {
+        return [targetAccount, ...prev];
       }
     });
-    if (updatedAccountToSave) {
-      saveDocument('firmAccounts', accountId, updatedAccountToSave);
-    }
+
+    // 4. Persist to Cloud SQL and Firestore
+    saveDocument('firmAccounts', accountId, targetAccount);
+    saveFirmAccountToSql(targetAccount);
+    addAccountTransactionToSql(txWithBalance);
+
     recordAudit(
       'ACCOUNT_TRANSACTION_RECORDED',
-      `${tx.type === 'credit' ? 'Credit / Deposit' : 'Debit / Payout'} of ₹${tx.amount.toLocaleString('en-IN')} recorded in A/C ID ${accountId}. Ref: ${tx.referenceNo || 'N/A'}.`,
+      `${tx.type === 'credit' ? 'Credit / Deposit' : 'Debit / Payout'} of ₹${tx.amount.toLocaleString('en-IN')} recorded in A/C ID ${accountId}. Ref: ${tx.referenceNo || 'N/A'}. New Balance: ₹${accurateBalance.toLocaleString('en-IN')}`,
       'Internal Syndicate'
     );
     showToast(`Recorded ${tx.type === 'credit' ? 'deposit' : 'payout'} of ₹${tx.amount.toLocaleString('en-IN')}`);
@@ -602,6 +724,7 @@ export default function App() {
     };
     setAuditLogs((prev) => [newEntry, ...prev]);
     saveDocument('auditLogs', newEntry.id, newEntry);
+    addAuditLogToSql(newEntry);
   };
 
   // Reset demo data
@@ -637,7 +760,8 @@ export default function App() {
     setIndividualInvestments(INITIAL_INDIVIDUAL_INVESTMENTS);
     setCurrentRole('accountant');
 
-    // Cloud Firestore Sync
+    // Cloud SQL & Firestore Sync
+    resetSqlData(false);
     saveDocument('system_meta', 'global_state', { cleanSlate: false, updatedAt: new Date().toISOString() });
     batchSaveDocuments('firms', INITIAL_FIRMS);
     batchSaveDocuments('projects', INITIAL_PROJECTS);
@@ -685,7 +809,8 @@ export default function App() {
     setPartnerStockDraws([]);
     setCurrentRole('super_admin');
 
-    // Cloud Firestore Sync: Wipe collections for all connected devices and notify all testers
+    // Cloud SQL & Firestore Sync
+    resetSqlData(true);
     saveDocument('system_meta', 'global_state', { cleanSlate: true, hasCustomData: false, updatedAt: new Date().toISOString() });
     clearFirestoreCollection('firms');
     clearFirestoreCollection('projects');
@@ -735,14 +860,17 @@ export default function App() {
     setProjects((prev) => [newProject, ...prev]);
     setSelectedProjectId(newProject.id);
     saveDocument('projects', newProject.id, newProject);
+    saveProjectToSql(newProject);
 
     if (initialPlots && initialPlots.length > 0) {
       setPlots((prev) => [...initialPlots, ...prev]);
       batchSaveDocuments('plots', initialPlots);
+      initialPlots.forEach((pl) => savePlotToSql(pl));
     }
     if (initialUnits && initialUnits.length > 0) {
       setApartmentUnits((prev) => [...initialUnits, ...prev]);
       batchSaveDocuments('apartmentUnits', initialUnits);
+      initialUnits.forEach((u) => saveApartmentUnitToSql(u));
     }
 
     // Automatically synchronize any new partner shares into master syndicate partners if needed
@@ -754,7 +882,7 @@ export default function App() {
 
         newProject.partners.forEach((p) => {
           if (!existingIds.has(p.partnerId) && !existingNames.has(p.name.toLowerCase())) {
-            toAdd.push({
+            const partnerEntry: SyndicatePartner = {
               id: p.partnerId,
               firmId: newProject.firmId,
               name: p.name,
@@ -771,7 +899,9 @@ export default function App() {
               userStatus: 'active',
               pinCode: '1234',
               dailySpendingLimit: 50000,
-            });
+            };
+            toAdd.push(partnerEntry);
+            savePartnerToSql(partnerEntry);
           }
         });
         if (toAdd.length > 0) {
@@ -791,14 +921,10 @@ export default function App() {
 
   // Super Admin: Add new firm
   const handleAddFirm = (newFirm: TenantFirm) => {
-    setFirms((prev) => {
-      const next = [newFirm, ...prev];
-      setStoredState('firms', next);
-      return next;
-    });
+    setFirms((prev) => [newFirm, ...prev]);
     setSelectedFirmId(newFirm.id);
-    setStoredState('selectedFirmId', newFirm.id);
     saveDocument('firms', newFirm.id, newFirm);
+    saveFirmToSql(newFirm);
     saveDocument('system_meta', 'global_state', { cleanSlate: false, hasCustomData: true, updatedAt: new Date().toISOString() });
 
     // Reset accountant session so tester must enter credentials
@@ -815,12 +941,9 @@ export default function App() {
 
   // Super Admin: Update firm details (e.g. sectors, name, location, etc.)
   const handleUpdateFirm = (updatedFirm: TenantFirm) => {
-    setFirms((prev) => {
-      const next = prev.map((f) => (f.id === updatedFirm.id ? updatedFirm : f));
-      setStoredState('firms', next);
-      return next;
-    });
+    setFirms((prev) => prev.map((f) => (f.id === updatedFirm.id ? updatedFirm : f)));
     saveDocument('firms', updatedFirm.id, updatedFirm);
+    saveFirmToSql(updatedFirm);
 
     // Also synchronize projects belonging to this firm: if a project's sector is no longer in the firm's active sectors, align it!
     setProjects((prev) => {
@@ -831,11 +954,11 @@ export default function App() {
             sector: updatedFirm.sectors[0] || 'real_estate_open_plotting',
           };
           saveDocument('projects', aligned.id, aligned);
+          saveProjectToSql(aligned);
           return aligned;
         }
         return p;
       });
-      setStoredState('projects', next);
       return next;
     });
 
@@ -846,7 +969,6 @@ export default function App() {
       );
       if (firmValidProjects.length > 0 && !firmValidProjects.some((p) => p.id === selectedProjectId)) {
         setSelectedProjectId(firmValidProjects[0].id);
-        setStoredState('selectedProjectId', firmValidProjects[0].id);
       }
     }
     recordAudit(
@@ -865,12 +987,12 @@ export default function App() {
       if (!target) return prev;
       const newStatus: TenantFirm['status'] = target.status === 'active' ? 'inactive' : 'active';
       const next = prev.map((f) => (f.id === firmId ? { ...f, status: newStatus } : f));
-      setStoredState('firms', next);
       updatedFirmToSave = next.find((f) => f.id === firmId);
       return next;
     });
     if (updatedFirmToSave) {
       saveDocument('firms', firmId, updatedFirmToSave);
+      saveFirmToSql(updatedFirmToSave);
       const newStatus = updatedFirmToSave.status === 'active' ? 'ACTIVE' : 'INACTIVE';
       recordAudit(
         `Tenant Lifecycle Changed: [${updatedFirmToSave.code}]`,
@@ -910,7 +1032,6 @@ export default function App() {
         updatedTargetFirm = updated;
         return updated;
       });
-      setStoredState('firms', next);
 
       // If currently selected firm was updated, ensure selected project is valid
       if (firmId === selectedFirmId) {
@@ -921,7 +1042,6 @@ export default function App() {
           );
           if (firmValidProjects.length > 0 && !firmValidProjects.some((p) => p.id === selectedProjectId)) {
             setSelectedProjectId(firmValidProjects[0].id);
-            setStoredState('selectedProjectId', firmValidProjects[0].id);
           }
         }
       }
@@ -931,6 +1051,7 @@ export default function App() {
 
     if (updatedTargetFirm) {
       saveDocument('firms', firmId, updatedTargetFirm);
+      saveFirmToSql(updatedTargetFirm);
       const targetFirm = updatedTargetFirm;
       setProjects((prev) => {
         const next = prev.map((p) => {
@@ -940,11 +1061,11 @@ export default function App() {
               sector: targetFirm.sectors[0] || 'real_estate_open_plotting',
             };
             saveDocument('projects', aligned.id, aligned);
+            saveProjectToSql(aligned);
             return aligned;
           }
           return p;
         });
-        setStoredState('projects', next);
         return next;
       });
     }
@@ -961,6 +1082,7 @@ export default function App() {
   const handleUpdatePlot = (updatedPlot: Plot) => {
     setPlots(plots.map((p) => (p.id === updatedPlot.id ? updatedPlot : p)));
     saveDocument('plots', updatedPlot.id, updatedPlot);
+    savePlotToSql(updatedPlot);
     recordAudit(
       `Plot Updated: ${updatedPlot.plotNumber}`,
       `Status: ${updatedPlot.status.toUpperCase()} | Rate: ₹${updatedPlot.ratePerSqYard}/Sq.Yd | Buyer: ${updatedPlot.buyerName || 'None'}${updatedPlot.discountApprovedBy ? ` | Discount Signoff: ${updatedPlot.discountApprovedBy}` : ''}`
@@ -974,6 +1096,7 @@ export default function App() {
 
   const handleAddProjectExpense = (newExpense: ProjectExpense) => {
     setProjectExpenses([...projectExpenses, newExpense]);
+    saveProjectExpenseToSql(newExpense);
     recordAudit(
       `Venture Cost Head Added: ${newExpense.category}`,
       `Budgeted: ₹${newExpense.estimatedBudget.toLocaleString('en-IN')} | Actual Spent: ₹${newExpense.actualSpent.toLocaleString('en-IN')} | Notes: ${newExpense.vendorNotes}`
@@ -985,12 +1108,14 @@ export default function App() {
     setProjectExpenses(
       projectExpenses.map((e) => (e.id === updatedExpense.id ? updatedExpense : e))
     );
+    saveProjectExpenseToSql(updatedExpense);
   };
 
   // Construction updates
   const handleUpdateApartmentUnit = (updatedUnit: ApartmentUnit) => {
     setApartmentUnits(apartmentUnits.map((u) => (u.id === updatedUnit.id ? updatedUnit : u)));
     saveDocument('apartmentUnits', updatedUnit.id, updatedUnit);
+    saveApartmentUnitToSql(updatedUnit);
     recordAudit(
       `Apartment Unit Updated: Flat #${updatedUnit.unitNumber}`,
       `Floor ${updatedUnit.floor} | Status: ${updatedUnit.status.toUpperCase()} | Base Rate: ₹${updatedUnit.baseRate}/Sft | Buyer: ${updatedUnit.buyerName || 'None'}`
@@ -1011,6 +1136,7 @@ export default function App() {
   const handleUpdatePartner = (updatedPartner: SyndicatePartner) => {
     setPartners(partners.map((p) => (p.id === updatedPartner.id ? updatedPartner : p)));
     saveDocument('partners', updatedPartner.id, updatedPartner);
+    savePartnerToSql(updatedPartner);
 
     // Synchronize into the active project's partner list as well
     setProjects((prevProjects) =>
@@ -1037,6 +1163,7 @@ export default function App() {
             totalInvestedCapital: updatedPartnerShares.reduce((sum, p) => sum + (p.actualInvested || 0), 0),
           };
           saveDocument('projects', updatedProj.id, updatedProj);
+          saveProjectToSql(updatedProj);
           return updatedProj;
         }
         return proj;
@@ -1058,6 +1185,7 @@ export default function App() {
     };
     setPartners((prev) => [partnerWithFirm, ...prev]);
     saveDocument('partners', partnerWithFirm.id, partnerWithFirm);
+    savePartnerToSql(partnerWithFirm);
 
     // If an active project is currently selected, also assign this partner into that project's partner shares
     if (selectedProjectId) {
@@ -1081,6 +1209,7 @@ export default function App() {
               };
               const updatedProj = { ...proj, partners: [...(proj.partners || []), newShare] };
               saveDocument('projects', updatedProj.id, updatedProj);
+              saveProjectToSql(updatedProj);
               return updatedProj;
             }
           }
@@ -1152,6 +1281,7 @@ export default function App() {
       approvalSignatures: signoff ? [signoff] : ['K. S. Narayana (Accountant)'],
     };
     saveDocument('fieldExpenses', expenseId, updatedExpense);
+    saveFieldExpenseToSql(updatedExpense);
 
     setFieldExpenses(
       fieldExpenses.map((e) => (e.id === expenseId ? updatedExpense : e))
@@ -1163,6 +1293,7 @@ export default function App() {
         if (p.id === expense.partnerId) {
           const updatedPartner = { ...p, shareOfFieldExpenses: p.shareOfFieldExpenses + expense.amount };
           saveDocument('partners', updatedPartner.id, updatedPartner);
+          savePartnerToSql(updatedPartner);
           return updatedPartner;
         }
         return p;
@@ -1183,10 +1314,40 @@ export default function App() {
           ...updated[matchIndex],
           actualSpent: updated[matchIndex].actualSpent + expense.amount,
         };
+        saveProjectExpenseToSql(updated[matchIndex]);
         return updated;
       }
       return prev;
     });
+
+    // If expense was paid from project bank account, debit the bank account
+    if (expense.paymentSource === 'project_bank') {
+      const targetAcc =
+        firmAccounts.find((a) => a.id === expense.bankAccountId) ||
+        firmAccounts.find((a) => a.firmId === selectedFirmId) ||
+        firmAccounts[0];
+      if (targetAcc) {
+        const debitTx: FirmAccountTransaction = {
+          id: `tx-exp-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`,
+          accountId: targetAcc.id,
+          date: expense.date || new Date().toISOString().split('T')[0],
+          type: 'debit',
+          amount: expense.amount,
+          description: `Site Expense: ${expense.category} - ${expense.note}`,
+          referenceNo: `EXP-${expense.id.slice(-6).toUpperCase()}`,
+          category: 'vendor_payout',
+          partnerName: expense.partnerName,
+          projectName: projects.find((p) => p.id === (expense.projectId || selectedProjectId))?.name || 'Project Venture',
+          balanceAfter: targetAcc.currentBalance - expense.amount,
+          enrolledBy: expense.enrolledBy || expense.partnerName,
+          approvedBy: signoff || currentFirm?.managingPartnerName || 'Managing Partner',
+          status: 'approved',
+          paymentMode: expense.paymentMode || 'Bank Transfer',
+          notes: expense.vendorName ? `Paid to: ${expense.vendorName}` : undefined,
+        };
+        handleAddAccountTransaction(targetAcc.id, debitTx);
+      }
+    }
 
     recordAudit(
       `Expense Approved: ₹${expense.amount.toLocaleString('en-IN')}`,
@@ -1201,6 +1362,7 @@ export default function App() {
     if (expense) {
       const rejected = { ...expense, status: 'rejected' as const };
       saveDocument('fieldExpenses', expenseId, rejected);
+      saveFieldExpenseToSql(rejected);
     }
     setFieldExpenses(
       fieldExpenses.map((e) =>
@@ -1217,14 +1379,52 @@ export default function App() {
   };
 
   // Field Partner: Submit new expense
-  const handleSubmitFieldExpense = (newExpense: FieldExpenseLog) => {
+  const handleSubmitFieldExpense = (newExpense: FieldExpenseLog, bankAccountId?: string) => {
     setFieldExpenses([newExpense, ...fieldExpenses]);
     saveDocument('fieldExpenses', newExpense.id, newExpense);
+    saveFieldExpenseToSql(newExpense);
+
+    // If submitted directly as approved and paymentSource is project_bank, debit bank immediately
+    if (newExpense.status === 'approved' && newExpense.paymentSource === 'project_bank') {
+      const targetAccId = bankAccountId || newExpense.bankAccountId;
+      const targetAcc =
+        firmAccounts.find((a) => a.id === targetAccId) ||
+        firmAccounts.find((a) => a.firmId === selectedFirmId) ||
+        firmAccounts[0];
+      if (targetAcc) {
+        const debitTx: FirmAccountTransaction = {
+          id: `tx-exp-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`,
+          accountId: targetAcc.id,
+          date: newExpense.date || new Date().toISOString().split('T')[0],
+          type: 'debit',
+          amount: newExpense.amount,
+          description: `Site Expense: ${newExpense.category} - ${newExpense.note}`,
+          referenceNo: `EXP-${newExpense.id.slice(-6).toUpperCase()}`,
+          category: 'vendor_payout',
+          partnerName: newExpense.partnerName,
+          projectName: projects.find((p) => p.id === (newExpense.projectId || selectedProjectId))?.name || 'Project Venture',
+          balanceAfter: targetAcc.currentBalance - newExpense.amount,
+          enrolledBy: newExpense.enrolledBy || newExpense.partnerName,
+          approvedBy: newExpense.approvedByPartners?.[0] || currentFirm?.managingPartnerName || 'Managing Partner',
+          status: 'approved',
+          paymentMode: newExpense.paymentMode || 'Bank Transfer',
+          notes: newExpense.vendorName ? `Paid to: ${newExpense.vendorName}` : undefined,
+        };
+        handleAddAccountTransaction(targetAcc.id, debitTx);
+      }
+    }
+
     recordAudit(
-      `Spot Field Expense Dispatched: ₹${newExpense.amount.toLocaleString('en-IN')}`,
-      `Logged by ${newExpense.partnerName} on mobile | Category: ${newExpense.category} | Voice Note: ${newExpense.hasVoiceNote ? 'Yes' : 'No'}`
+      newExpense.status === 'approved'
+        ? `Project Expense Enrolled: ₹${newExpense.amount.toLocaleString('en-IN')}`
+        : `Spot Field Expense Dispatched: ₹${newExpense.amount.toLocaleString('en-IN')}`,
+      `Logged by ${newExpense.partnerName} | Category: ${newExpense.category} | Source: ${newExpense.paymentSource === 'project_bank' ? 'Project Bank Account' : 'Individual Personal Funds'}`
     );
-    showToast(`Spot field expense ₹${newExpense.amount.toLocaleString('en-IN')} dispatched to Accountant verification queue.`);
+    showToast(
+      newExpense.status === 'approved'
+        ? `✓ Expense ₹${newExpense.amount.toLocaleString('en-IN')} approved & debited to project statement!`
+        : `Spot field expense ₹${newExpense.amount.toLocaleString('en-IN')} dispatched to Accountant verification queue.`
+    );
   };
 
   // Sector C: Liquor Vends handlers
@@ -1286,6 +1486,7 @@ export default function App() {
 
     setIndividualInvestments((prev) => [newRecord, ...prev]);
     saveDocument('individualInvestments', newRecord.id, newRecord);
+    saveIndividualInvestmentToSql(newRecord);
 
     if (data.status === 'approved') {
       // 1. Credit the bank or cash account
@@ -1344,6 +1545,7 @@ export default function App() {
               totalInvestedCapital: updatedShares.reduce((sum, p) => sum + (p.actualInvested || 0), 0),
             };
             saveDocument('projects', updatedProj.id, updatedProj);
+            saveProjectToSql(updatedProj);
             return updatedProj;
           }
           return proj;
@@ -1369,6 +1571,7 @@ export default function App() {
     const approvedAt = new Date().toISOString().replace('T', ' ').slice(0, 16);
     const approvedInv = { ...inv, status: 'approved' as const, approvedBy: approverName, approvedAt };
     saveDocument('individualInvestments', investmentId, approvedInv);
+    saveIndividualInvestmentToSql(approvedInv);
     setIndividualInvestments((prev) =>
       prev.map((i) =>
         i.id === investmentId ? approvedInv : i
@@ -1430,6 +1633,7 @@ export default function App() {
             totalInvestedCapital: updatedShares.reduce((sum, p) => sum + (p.actualInvested || 0), 0),
           };
           saveDocument('projects', updatedProj.id, updatedProj);
+          saveProjectToSql(updatedProj);
           return updatedProj;
         }
         return proj;
@@ -1447,11 +1651,13 @@ export default function App() {
   const handleRejectIndividualInvestment = (investmentId: string, reason?: string) => {
     const inv = individualInvestments.find((i) => i.id === investmentId);
     if (inv) {
-      saveDocument('individualInvestments', investmentId, {
+      const rejectedInv = {
         ...inv,
-        status: 'rejected',
+        status: 'rejected' as const,
         rejectionReason: reason || 'Rejected during consensus review'
-      });
+      };
+      saveDocument('individualInvestments', investmentId, rejectedInv);
+      saveIndividualInvestmentToSql(rejectedInv);
     }
     setIndividualInvestments((prev) =>
       prev.map((i) =>
@@ -1514,15 +1720,6 @@ export default function App() {
           url.searchParams.delete('venture');
           window.history.replaceState({}, '', url.toString());
         }}
-        onSwitchToStaff={() => {
-          setIsMarketingPortal(false);
-          setCurrentRole('accountant');
-          const url = new URL(window.location.href);
-          url.searchParams.delete('portal');
-          url.searchParams.delete('venture');
-          url.searchParams.set('role', 'accountant');
-          window.history.replaceState({}, '', url.toString());
-        }}
         project={marketingProject}
         firm={marketingFirm}
         plots={marketingPlots}
@@ -1541,12 +1738,73 @@ export default function App() {
     );
   }
 
+  // Synthesized partners for active firm (merging firm-level partners + project-assigned partners)
+  const currentFirmPartners = useMemo(() => {
+    if (!currentFirm) return [];
+    const list: SyndicatePartner[] = [];
+    const seenIds = new Set<string>();
+    const seenNames = new Set<string>();
+
+    partners
+      .filter((p) => p.firmId === currentFirm.id)
+      .forEach((p) => {
+        list.push(p);
+        seenIds.add(String(p.id));
+        seenNames.add(p.name.trim().toLowerCase());
+      });
+
+    projects
+      .filter((p) => p.firmId === currentFirm.id)
+      .forEach((proj) => {
+        (proj.partners || []).forEach((ps) => {
+          if (!seenIds.has(String(ps.partnerId)) && !seenNames.has(ps.name.trim().toLowerCase())) {
+            seenIds.add(String(ps.partnerId));
+            seenNames.add(ps.name.trim().toLowerCase());
+            list.push({
+              id: ps.partnerId,
+              firmId: currentFirm.id,
+              name: ps.name,
+              phone: ps.phone || '+91 ',
+              roleDescription: ps.roleInProject || 'Investor Partner',
+              avatarColor: ps.avatarColor || 'bg-indigo-600',
+              initialCapital: ps.initialCapital || 0,
+              actualInvested: ps.actualInvested || 0,
+              fixedEquityPercent: ps.equityPercent || 0,
+              drawings: ps.drawings || 0,
+              shareOfFieldExpenses: ps.shareOfFieldExpenses || 0,
+              userRole: ps.roleInProject?.toLowerCase().includes('managing')
+                ? 'managing_partner'
+                : 'field_partner',
+              userStatus: 'active',
+              pinCode: '1234',
+              dailySpendingLimit: 50000,
+            });
+          }
+        });
+      });
+
+    return list;
+  }, [currentFirm, partners, projects]);
+
+  if (!currentUser) {
+    return (
+      <ProductionAuthGate
+        onLoginSuccess={handleLoginSuccess}
+        availableFirmsCount={firms.length}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#F4F4F6] text-gray-950 flex flex-col font-sans selection:bg-amber-400 selection:text-gray-950">
       {/* Top Header with Role Switcher & Tenant Info */}
       <Header
         currentRole={currentRole}
-        onRoleChange={setCurrentRole}
+        onRoleChange={(role) => {
+          if (currentUser?.role === 'super_admin') {
+            setCurrentRole(role);
+          }
+        }}
         firms={firms}
         selectedFirmId={selectedFirmId}
         onFirmChange={handleFirmChange}
@@ -1556,6 +1814,8 @@ export default function App() {
         firmAccountsCount={firmAccounts.filter((a) => a.firmId === selectedFirmId).length}
         isStandalone={isStandalone}
         onToggleStandalone={() => setIsStandalone((prev) => !prev)}
+        currentUser={currentUser}
+        onSignOut={handleSignOut}
       />
 
       {/* Main Content Area */}
@@ -1567,6 +1827,10 @@ export default function App() {
             onUpdateFirm={handleUpdateFirm}
             onToggleFirmStatus={handleToggleFirmStatus}
             onUpdateFirmFlags={handleUpdateFirmFlags}
+            onSwitchRole={(role, firmId) => {
+              if (firmId) setSelectedFirmId(firmId);
+              setCurrentRole(role);
+            }}
           />
         )}
 
@@ -1606,34 +1870,30 @@ export default function App() {
                 onUpdateApartmentUnit={handleUpdateApartmentUnit}
                 pricingMatrix={pricingMatrix}
                 onUpdatePricingMatrix={handleUpdatePricingMatrix}
-                partners={partners.filter((p) => p.firmId === currentFirm.id)}
+                partners={currentFirmPartners}
                 onUpdatePartner={handleUpdatePartner}
                 onAddPartnerMember={handleAddPartnerMember}
                 splitMode={splitMode}
                 onToggleSplitMode={handleToggleSplitMode}
-                fieldExpenses={fieldExpenses.filter((e) => e.firmId === currentFirm.id)}
+                fieldExpenses={fieldExpenses.filter((e) => !e.firmId || e.firmId === currentFirm.id)}
                 onApproveExpense={handleApproveExpense}
                 onRejectExpense={handleRejectExpense}
                 onEnrollExpense={handleSubmitFieldExpense}
                 ledgerMode={ledgerMode}
                 onToggleLedgerMode={handleToggleLedgerMode}
                 auditLogs={auditLogs}
-                liquorSettlements={liquorSettlements.filter((s) => s.firmId === currentFirm.id)}
+                liquorSettlements={liquorSettlements.filter((s) => !s.firmId || s.firmId === currentFirm.id)}
                 onAddLiquorSettlement={handleAddLiquorSettlement}
-                partnerStockDraws={partnerStockDraws.filter((d) => d.firmId === currentFirm.id)}
+                partnerStockDraws={partnerStockDraws.filter((d) => !d.firmId || d.firmId === currentFirm.id)}
                 onAddStockDraw={handleAddStockDraw}
-                firmAccounts={firmAccounts.filter((a) => a.firmId === currentFirm.id)}
+                firmAccounts={firmAccounts.filter((a) => !a.firmId || a.firmId === currentFirm.id)}
                 onAddFirmAccount={handleAddFirmAccount}
                 onAddAccountTransaction={handleAddAccountTransaction}
-                individualInvestments={individualInvestments.filter((i) => i.firmId === currentFirm.id)}
+                individualInvestments={individualInvestments.filter((i) => !i.firmId || i.firmId === currentFirm.id)}
                 onRecordIndividualInvestment={handleRecordIndividualInvestment}
                 onApproveIndividualInvestment={handleApproveIndividualInvestment}
                 onRejectIndividualInvestment={handleRejectIndividualInvestment}
-                onSignOut={() => {
-                  sessionStorage.removeItem('syndicate_accountant_session');
-                  setAccountantSession(null);
-                  showToast('Signed out of Accountant console.');
-                }}
+                onSignOut={handleSignOut}
               />
             )
           ) : (
@@ -1696,14 +1956,14 @@ export default function App() {
             <FieldPartnerMobileView
               firm={currentFirm}
               firms={firms}
-              partners={partners.filter((p) => p.firmId === currentFirm.id)}
+              partners={currentFirmPartners}
               plots={plots.filter((p) => p.firmId === currentFirm.id)}
               apartmentUnits={apartmentUnits.filter((u) => u.firmId === currentFirm.id)}
-              fieldExpenses={fieldExpenses.filter((e) => e.firmId === currentFirm.id)}
+              fieldExpenses={fieldExpenses.filter((e) => !e.firmId || e.firmId === currentFirm.id)}
               onSubmitExpense={handleSubmitFieldExpense}
               session={fieldPartnerSession}
               onLogin={handleFieldPartnerLogin}
-              onLogout={handleFieldPartnerLogout}
+              onLogout={handleSignOut}
               onUpdatePlot={handleUpdatePlot}
               projects={projects.filter(
                 (p) => p.firmId === currentFirm.id && currentFirm.sectors.includes(p.sector)
@@ -1715,14 +1975,15 @@ export default function App() {
               projectExpenses={projectExpenses.filter((pe) => projects.some((p) => p.id === pe.projectId && p.firmId === currentFirm.id))}
               onAddProjectExpense={handleAddProjectExpense}
               onUpdateProjectExpense={handleUpdateProjectExpense}
-              firmAccounts={firmAccounts.filter((a) => a.firmId === currentFirm.id)}
-              partnerStockDraws={partnerStockDraws.filter((d) => d.firmId === currentFirm.id)}
+              firmAccounts={firmAccounts.filter((a) => !a.firmId || a.firmId === currentFirm.id)}
+              partnerStockDraws={partnerStockDraws.filter((d) => !d.firmId || d.firmId === currentFirm.id)}
               onAddAccountTransaction={handleAddAccountTransaction}
               onAddStockDraw={handleAddStockDraw}
               onApproveExpense={handleApproveExpense}
               onRejectExpense={handleRejectExpense}
               ledgerMode={ledgerMode}
-              individualInvestments={individualInvestments.filter((i) => i.firmId === currentFirm.id)}
+              onUpdatePartner={handleUpdatePartner}
+              individualInvestments={individualInvestments.filter((i) => !i.firmId || i.firmId === currentFirm.id)}
               onRecordIndividualInvestment={handleRecordIndividualInvestment}
               onApproveIndividualInvestment={handleApproveIndividualInvestment}
               onRejectIndividualInvestment={handleRejectIndividualInvestment}

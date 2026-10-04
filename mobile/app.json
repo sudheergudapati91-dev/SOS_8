@@ -1,0 +1,26 @@
+{
+  "expo": {
+    "name": "SyndicateOS Partner & Accountant",
+    "slug": "syndicate-os-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#0b0f19"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "in.krishisetu9.syndicate"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0b0f19"
+      },
+      "package": "in.krishisetu9.syndicate"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}

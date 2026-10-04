@@ -1,5 +1,16 @@
 export type Role = 'super_admin' | 'accountant' | 'field_partner';
 
+export interface AuthenticatedAppUser {
+  id: string;
+  phone: string;
+  name: string;
+  role: Role | 'managing_partner';
+  firmId: string | null;
+  firmCode: string | null;
+  partnerId: string | null;
+  mustChangePin: boolean;
+}
+
 export type SectorType = 
   | 'real_estate_open_plotting'
   | 'real_estate_construction'
@@ -347,7 +358,29 @@ export interface FieldExpenseLog {
   taxInvoiceNo?: string;
   vendorName?: string;
   paymentMode?: string;
+  paymentSource?: 'project_bank' | 'individual'; // paid from project bank account vs partner individual funds
+  bankAccountId?: string; // which project bank account is debited
+  bankAccountName?: string;
   enrolledBy?: string;
+}
+
+export interface DrawingRequest {
+  id: string;
+  firmId?: string;
+  projectId?: string;
+  partnerId: string;
+  partnerName: string;
+  amount: number;
+  payoutMode: 'Bank Transfer' | 'Field Vault Cash' | 'Cheque';
+  sourceAccountId?: string;
+  sourceAccountName?: string;
+  destinationAccountDetails: string;
+  purpose: string;
+  requestedAt: string;
+  status: 'pending_approval' | 'approved' | 'cleared';
+  reviewedBy?: string;
+  disbursedBy?: string;
+  disbursedAt?: string;
 }
 
 export interface AuditLogEntry {

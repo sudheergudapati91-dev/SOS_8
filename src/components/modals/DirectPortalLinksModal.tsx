@@ -16,7 +16,8 @@ import {
   Building2,
   Users,
   Eye,
-  EyeOff
+  EyeOff,
+  Share2
 } from 'lucide-react';
 
 interface DirectPortalLinksModalProps {
@@ -51,6 +52,7 @@ export const DirectPortalLinksModal: React.FC<DirectPortalLinksModalProps> = ({
     }
     if (isIsolated && role !== 'super_admin') {
       params.set('isolated', 'true');
+      params.set('standalone', 'true');
     }
     return `${baseUrl}?${params.toString()}`;
   };
@@ -58,6 +60,7 @@ export const DirectPortalLinksModal: React.FC<DirectPortalLinksModalProps> = ({
   const accountantUrl = getPortalUrl('accountant');
   const partnerUrl = getPortalUrl('field_partner');
   const superAdminUrl = getPortalUrl('super_admin');
+  const marketingUrl = `${baseUrl}?portal=marketing${currentFirm ? `&firmId=${encodeURIComponent(currentFirm.id)}` : ''}&standalone=true`;
 
   const copyToClipboard = (text: string, key: string) => {
     navigator.clipboard.writeText(text).then(() => {
@@ -335,6 +338,65 @@ export const DirectPortalLinksModal: React.FC<DirectPortalLinksModalProps> = ({
                   className="px-4 py-2 rounded-xl bg-gray-900 hover:bg-black text-white font-black text-xs flex items-center gap-1.5 shadow-2xs transition-all shrink-0 cursor-pointer active:scale-95"
                 >
                   {copiedKey === 'superadmin' ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-white" />
+                      <span>Copied! ✓</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5 text-white" />
+                      <span>Copy Link</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* LINK 4: MARKETING & BROKER PORTAL (EXTERNAL FIELD ACCESS) */}
+            <div className="bg-white rounded-2xl border-2 border-indigo-300/80 p-4 space-y-2.5 shadow-2xs hover:shadow-xs transition-shadow">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-xl bg-indigo-100 text-indigo-900 flex items-center justify-center font-black">
+                    <Share2 className="w-4 h-4 text-indigo-700" />
+                  </div>
+                  <div>
+                    <h4 className="font-black text-gray-950 text-xs flex items-center gap-1.5">
+                      <span>Marketing &amp; Channel Partner Portal Link</span>
+                      <span className="text-[9px] bg-indigo-100 text-indigo-900 font-extrabold px-2 py-0.5 rounded-full">
+                        Brokers &amp; Sales
+                      </span>
+                    </h4>
+                    <span className="text-[10px] text-gray-500 font-medium">
+                      External broker &amp; marketing link: Plot inventory grid &amp; customer booking request only. No access to internal staff controls or confidential syndicate statements.
+                    </span>
+                  </div>
+                </div>
+
+                <a
+                  href={marketingUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="p-1.5 rounded-xl hover:bg-gray-100 text-gray-600 hover:text-gray-950 transition-colors"
+                  title="Open in new tab to test"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                </a>
+              </div>
+
+              {/* URL Box & Copy Button */}
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={marketingUrl}
+                  className="flex-1 px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl font-mono text-[11px] text-gray-800 select-all outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard(marketingUrl, 'marketing')}
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs flex items-center gap-1.5 shadow-2xs transition-all shrink-0 cursor-pointer active:scale-95"
+                >
+                  {copiedKey === 'marketing' ? (
                     <>
                       <Check className="w-3.5 h-3.5 text-white" />
                       <span>Copied! ✓</span>

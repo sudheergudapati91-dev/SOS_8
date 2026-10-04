@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Role, TenantFirm } from '../types';
+import { Role, TenantFirm, AuthenticatedAppUser } from '../types';
 import { 
   ShieldCheck, 
   Building2, 
@@ -16,7 +16,11 @@ import {
   ExternalLink,
   Trash2,
   X,
-  Users
+  Users,
+  AlertCircle,
+  Eye,
+  LogOut,
+  UserCheck
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -31,6 +35,8 @@ interface HeaderProps {
   firmAccountsCount?: number;
   isStandalone?: boolean;
   onToggleStandalone?: () => void;
+  currentUser?: AuthenticatedAppUser | null;
+  onSignOut?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -45,18 +51,19 @@ export const Header: React.FC<HeaderProps> = ({
   firmAccountsCount,
   isStandalone = false,
   onToggleStandalone,
+  currentUser,
+  onSignOut,
 }) => {
   const currentFirm = firms.find((f) => f.id === selectedFirmId) || firms[0];
   const [showShareModal, setShowShareModal] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [urlMode, setUrlMode] = useState<'dev' | 'public'>('public');
 
   const getBaseUrl = () => {
     if (typeof window !== 'undefined') {
       let origin = window.location.origin;
-      // Convert internal developer preview (ais-dev-) to public shareable preview (ais-pre-)
-      // so testers, incognito windows, and other laptops do not get redirected to aistudio.google.com/404
-      if (origin.includes('ais-dev-')) {
+      if (urlMode === 'public' && origin.includes('ais-dev-')) {
         origin = origin.replace('ais-dev-', 'ais-pre-');
       }
       return `${origin}${window.location.pathname}`;
@@ -226,80 +233,71 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         )}
 
-        {/* Role Switcher or Standalone Locked Mode */}
-        {isStandalone ? (
-          <div className="flex items-center gap-2 bg-[#111827] px-3 py-1.5 rounded-full border border-gray-800 shadow-md">
-            <div className="flex items-center gap-2 text-xs font-bold text-amber-400">
-              <Lock className="w-3.5 h-3.5 text-amber-400" />
-              <span>
-                {currentRole === 'super_admin' && 'Owner Admin View'}
-                {currentRole === 'accountant' && 'Firm Accountant Portal'}
-                {currentRole === 'field_partner' && 'Partner Mobile Portal'}
-              </span>
-            </div>
-            {onToggleStandalone && (
-              <button
-                onClick={onToggleStandalone}
-                className="ml-2 text-[10px] bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white px-2 py-0.5 rounded-full transition-colors"
-                title="Switch back to full unified view with all roles"
-              >
-                Show All Dashboards
-              </button>
-            )}
-          </div>
-        ) : (
-          <nav aria-label="Role Navigation" className="flex items-center p-1 bg-[#111827] rounded-full border border-gray-800 shadow-md">
-            <button
-              id="role-btn-superadmin"
-              onClick={() => onRoleChange('super_admin')}
-              title="Super Admin role — Managed exclusively by Application / Product Owner"
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold transition-all ${
-                currentRole === 'super_admin'
-                  ? 'bg-[#FFB800] text-gray-950 shadow-md scale-105'
-                  : 'text-gray-300 hover:text-white hover:bg-gray-800'
-              }`}
-            >
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <div className="flex items-center gap-1">
-                <span>Super Admin</span>
-                <span className={`text-[9px] px-1.5 py-0.2 rounded-full font-extrabold ${currentRole === 'super_admin' ? 'bg-[#111827] text-amber-300' : 'bg-gray-800 text-gray-400'}`}>
+        {/* Dedicated Role Badge - Each dashboard is an individual, isolated portal */}
+        <div className="flex items-center gap-3">
+          {currentRole === 'super_admin' ? (
+            <div className="flex items-center gap-2 bg-[#111827] px-4 py-2 rounded-full border border-gray-800 shadow-md">
+              <ShieldCheck className="w-4 h-4 text-[#FFB800]" />
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-black text-white">Super Admin Console</span>
+                <span className="text-[10px] bg-[#FFB800] text-gray-950 font-black px-2 py-0.5 rounded-full">
                   Owner
                 </span>
               </div>
-            </button>
+            </div>
+          ) : currentRole === 'accountant' ? (
+            <div className="flex items-center gap-2 bg-[#111827] px-4 py-2 rounded-full border border-gray-800 shadow-md">
+              <Calculator className="w-4 h-4 text-[#FFB800]" />
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-black text-white">Firm Accountant Portal</span>
+                {pendingExpensesCount > 0 && (
+                  <span className="px-1.5 py-0.2 bg-red-500 text-white font-black rounded-full text-[10px] animate-pulse">
+                    {pendingExpensesCount}
+                  </span>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 bg-[#111827] px-4 py-2 rounded-full border border-gray-800 shadow-md">
+              <Smartphone className="w-4 h-4 text-[#FFB800]" />
+              <span className="text-xs font-black text-white">Partner Mobile Portal</span>
+            </div>
+          )}
 
-            <button
-              id="role-btn-accountant"
-              onClick={() => onRoleChange('accountant')}
-              className={`relative flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold transition-all ${
-                currentRole === 'accountant'
-                  ? 'bg-[#FFB800] text-gray-950 shadow-md scale-105'
-                  : 'text-gray-300 hover:text-white hover:bg-gray-800'
-              }`}
-            >
-              <Calculator className="w-3.5 h-3.5" />
-              <span>Firm Accountant</span>
-              {pendingExpensesCount > 0 && (
-                <span className="ml-1 px-1.5 py-0.5 bg-red-500 text-white font-black rounded-full text-[10px] animate-pulse">
-                  {pendingExpensesCount}
-                </span>
-              )}
-            </button>
+          {/* User Identity Chip & Sign Out */}
+          {currentUser && (
+            <div className="flex items-center gap-2 bg-[#111827] px-3.5 py-1.5 rounded-full border border-gray-800 shadow-md">
+              <div className="w-6 h-6 rounded-full bg-[#FFB800] text-gray-950 flex items-center justify-center font-bold text-xs shrink-0">
+                {currentUser.name ? currentUser.name[0].toUpperCase() : 'U'}
+              </div>
+              <div className="text-left hidden sm:block">
+                <div className="text-xs font-black text-white flex items-center gap-1.5 leading-none">
+                  <span>{currentUser.name}</span>
+                  {currentUser.firmCode && (
+                    <span className="text-[10px] bg-amber-400/20 text-[#FFB800] px-1.5 py-0.2 rounded font-mono">
+                      {currentUser.firmCode}
+                    </span>
+                  )}
+                </div>
+                <div className="text-[10px] text-gray-400 font-mono mt-0.5 leading-none">
+                  +91 {currentUser.phone}
+                </div>
+              </div>
+            </div>
+          )}
 
+          {onSignOut && (
             <button
-              id="role-btn-fieldpartner"
-              onClick={() => onRoleChange('field_partner')}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold transition-all ${
-                currentRole === 'field_partner'
-                  ? 'bg-[#FFB800] text-gray-950 shadow-md scale-105'
-                  : 'text-gray-300 hover:text-white hover:bg-gray-800'
-              }`}
+              type="button"
+              onClick={onSignOut}
+              title="Sign out of session"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-950/80 hover:bg-red-950 text-gray-200 hover:text-red-200 rounded-full text-xs font-bold border border-white/10 hover:border-red-500/40 transition-colors cursor-pointer shadow-xs"
             >
-              <Smartphone className="w-3.5 h-3.5" />
-              <span>Partner Dashboard</span>
+              <LogOut className="w-3.5 h-3.5 text-red-400" />
+              <span className="hidden sm:inline">Sign Out</span>
             </button>
-          </nav>
-        )}
+          )}
+        </div>
       </div>
 
       {/* SHARE / TESTER LINKS MODAL */}
@@ -327,11 +325,45 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
 
             <div className="p-6 space-y-4 text-xs">
-              <div className="bg-amber-50 rounded-2xl p-3 border border-amber-200 text-amber-950">
-                <span className="font-bold block">💡 How Testing Links Work:</span>
-                <p className="mt-0.5 text-[11px] text-amber-800">
-                  Each link contains URL parameters specifying the dashboard role and targeted firm. When a tester opens their link with <code>standalone=true</code>, other dashboards are hidden so they experience a clean, isolated client portal.
+              {/* Google 403 & Sharing Guide Notice */}
+              <div className="bg-blue-50 border border-blue-200 rounded-2xl p-3.5 text-blue-950 space-y-1.5">
+                <div className="flex items-center gap-2 font-bold text-blue-900 text-xs">
+                  <AlertCircle className="w-4 h-4 text-blue-600 shrink-0" />
+                  <span>How to test without Google 403 errors:</span>
+                </div>
+                <p className="text-[11px] text-blue-800 leading-relaxed">
+                  • <strong>For You (Immediate Testing):</strong> Click <span className="font-bold text-blue-950 underline">Preview in This Tab</span> below to test without opening a new window or hitting Google's auth bridge.<br/>
+                  • <strong>For External Testers (Other Laptops / Phones):</strong> Click the <strong>"Share"</strong> button in the AI Studio top bar (next to Remix/Publish) to activate public access, then switch the toggle below to <strong>Public Link (ais-pre)</strong>.
                 </p>
+              </div>
+
+              {/* Domain Mode Selector Toggle */}
+              <div className="flex items-center justify-between bg-gray-100 p-2 rounded-2xl border border-gray-200">
+                <span className="text-[11px] font-bold text-gray-700 pl-2">Target Link Environment:</span>
+                <div className="flex items-center gap-1 bg-white p-1 rounded-xl shadow-2xs border border-gray-200">
+                  <button
+                    type="button"
+                    onClick={() => setUrlMode('dev')}
+                    className={`px-3 py-1 rounded-lg font-bold text-[11px] transition-all cursor-pointer ${
+                      urlMode === 'dev'
+                        ? 'bg-amber-400 text-gray-950 shadow-xs'
+                        : 'text-gray-600 hover:text-gray-950'
+                    }`}
+                  >
+                    Active Session (ais-dev)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setUrlMode('public')}
+                    className={`px-3 py-1 rounded-lg font-bold text-[11px] transition-all cursor-pointer ${
+                      urlMode === 'public'
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'text-gray-600 hover:text-gray-950'
+                    }`}
+                  >
+                    Public / Client (ais-pre)
+                  </button>
+                </div>
               </div>
 
               {/* Link 1: Firm Accountant Tester Link */}
@@ -357,7 +389,7 @@ export const Header: React.FC<HeaderProps> = ({
                   />
                   <button
                     onClick={() => copyToClipboard(accountantUrl, 'accountant')}
-                    className="flex items-center gap-1 px-3 py-1.5 bg-[#FFB800] hover:bg-amber-400 text-gray-950 font-bold rounded-xl shadow-xs transition-colors shrink-0"
+                    className="flex items-center gap-1 px-3 py-1.5 bg-[#FFB800] hover:bg-amber-400 text-gray-950 font-bold rounded-xl shadow-xs transition-colors shrink-0 cursor-pointer"
                   >
                     {copiedKey === 'accountant' ? (
                       <>
@@ -371,6 +403,15 @@ export const Header: React.FC<HeaderProps> = ({
                       </>
                     )}
                   </button>
+                  <a
+                    href={accountantUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1 px-3 py-1.5 bg-gray-900 hover:bg-black text-amber-300 font-bold rounded-xl text-xs shrink-0 shadow-xs"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Open in New Tab ↗</span>
+                  </a>
                 </div>
               </div>
 
@@ -397,7 +438,7 @@ export const Header: React.FC<HeaderProps> = ({
                   />
                   <button
                     onClick={() => copyToClipboard(partnerUrl, 'partner')}
-                    className="flex items-center gap-1 px-3 py-1.5 bg-[#FFB800] hover:bg-amber-400 text-gray-950 font-bold rounded-xl shadow-xs transition-colors shrink-0"
+                    className="flex items-center gap-1 px-3 py-1.5 bg-[#FFB800] hover:bg-amber-400 text-gray-950 font-bold rounded-xl shadow-xs transition-colors shrink-0 cursor-pointer"
                   >
                     {copiedKey === 'partner' ? (
                       <>
@@ -411,6 +452,15 @@ export const Header: React.FC<HeaderProps> = ({
                       </>
                     )}
                   </button>
+                  <a
+                    href={partnerUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1 px-3 py-1.5 bg-gray-900 hover:bg-black text-amber-300 font-bold rounded-xl text-xs shrink-0 shadow-xs"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Open in New Tab ↗</span>
+                  </a>
                 </div>
               </div>
 
@@ -434,20 +484,29 @@ export const Header: React.FC<HeaderProps> = ({
                   />
                   <button
                     onClick={() => copyToClipboard(superAdminUrl, 'superadmin')}
-                    className="flex items-center gap-1 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-white font-bold rounded-xl shadow-xs transition-colors shrink-0"
+                    className="flex items-center gap-1 px-3 py-1.5 bg-[#FFB800] hover:bg-amber-400 text-gray-950 font-bold rounded-xl shadow-xs transition-colors shrink-0 cursor-pointer"
                   >
                     {copiedKey === 'superadmin' ? (
                       <>
-                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        <Check className="w-3.5 h-3.5 text-emerald-800" />
                         <span>Copied!</span>
                       </>
                     ) : (
                       <>
                         <Copy className="w-3.5 h-3.5" />
-                        <span>Copy</span>
+                        <span>Copy Link</span>
                       </>
                     )}
                   </button>
+                  <a
+                    href={superAdminUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1 px-3 py-1.5 bg-gray-900 hover:bg-black text-amber-300 font-bold rounded-xl text-xs shrink-0 shadow-xs"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Open in New Tab ↗</span>
+                  </a>
                 </div>
               </div>
             </div>

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { TenantFirm, SectorType, FeatureFlags } from '../../types';
+import { TenantFirm, SectorType, FeatureFlags, Role } from '../../types';
 import { formatINR, formatIndianCompact } from '../../utils/formatters';
 import {
   ShieldAlert,
@@ -34,7 +34,8 @@ import {
   Hash,
   Copy,
   CheckCheck,
-  Smartphone
+  Smartphone,
+  Globe
 } from 'lucide-react';
 
 interface SuperAdminViewProps {
@@ -45,6 +46,7 @@ interface SuperAdminViewProps {
   onUpdateFirmFlags: (firmId: string, flags: Partial<FeatureFlags>) => void;
   onSelectFirm?: (firmId: string) => void;
   activeFirmId?: string;
+  onSwitchRole?: (role: Role, firmId?: string) => void;
 }
 
 export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
@@ -55,6 +57,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
   onUpdateFirmFlags,
   onSelectFirm,
   activeFirmId,
+  onSwitchRole,
 }) => {
   const [showOnboardingModal, setShowOnboardingModal] = useState(false);
   
@@ -95,12 +98,12 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
   const [linksModalFirm, setLinksModalFirm] = useState<TenantFirm | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
+  const [urlMode, setUrlMode] = useState<'dev' | 'public'>('public');
+
   const getBaseUrl = () => {
     if (typeof window !== 'undefined') {
       let origin = window.location.origin;
-      // Convert internal developer preview (ais-dev-) to public shareable preview (ais-pre-)
-      // so testers, incognito windows, and other laptops do not get redirected to aistudio.google.com/404
-      if (origin.includes('ais-dev-')) {
+      if (urlMode === 'public' && origin.includes('ais-dev-')) {
         origin = origin.replace('ais-dev-', 'ais-pre-');
       }
       return `${origin}${window.location.pathname}`;
@@ -1924,11 +1927,45 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
             </div>
 
             <div className="p-6 space-y-4 text-xs">
-              <div className="bg-amber-50 rounded-2xl p-3 border border-amber-200 text-amber-950">
-                <span className="font-bold block">💡 Client Isolation Mode</span>
-                <p className="mt-0.5 text-[11px] text-amber-800">
-                  These links include <code>standalone=true</code>. When your testers open these links, the Super Admin tab is hidden so they only see their respective portal without confusion.
+              {/* Google 403 & Sharing Guide Notice */}
+              <div className="bg-blue-50 border border-blue-200 rounded-2xl p-3.5 text-blue-950 space-y-1.5">
+                <div className="flex items-center gap-2 font-bold text-blue-900 text-xs">
+                  <AlertCircle className="w-4 h-4 text-blue-600 shrink-0" />
+                  <span>How to test without Google 403 errors:</span>
+                </div>
+                <p className="text-[11px] text-blue-800 leading-relaxed">
+                  • <strong>For You (Immediate Testing):</strong> Click <span className="font-bold text-blue-950 underline">Preview in This Tab</span> below to test without opening a new window or hitting Google's auth bridge.<br/>
+                  • <strong>For External Testers (Other Laptops / Phones):</strong> Click the <strong>"Share"</strong> button in the AI Studio top bar (next to Remix/Publish) to activate public access, then switch the toggle below to <strong>Public Link (ais-pre)</strong>.
                 </p>
+              </div>
+
+              {/* Domain Mode Selector Toggle */}
+              <div className="flex items-center justify-between bg-gray-100 p-2 rounded-2xl border border-gray-200">
+                <span className="text-[11px] font-bold text-gray-700 pl-2">Target Link Environment:</span>
+                <div className="flex items-center gap-1 bg-white p-1 rounded-xl shadow-2xs border border-gray-200">
+                  <button
+                    type="button"
+                    onClick={() => setUrlMode('dev')}
+                    className={`px-3 py-1 rounded-lg font-bold text-[11px] transition-all cursor-pointer ${
+                      urlMode === 'dev'
+                        ? 'bg-amber-400 text-gray-950 shadow-xs'
+                        : 'text-gray-600 hover:text-gray-950'
+                    }`}
+                  >
+                    Active Session (ais-dev)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setUrlMode('public')}
+                    className={`px-3 py-1 rounded-lg font-bold text-[11px] transition-all cursor-pointer ${
+                      urlMode === 'public'
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'text-gray-600 hover:text-gray-950'
+                    }`}
+                  >
+                    Public / Client (ais-pre)
+                  </button>
+                </div>
               </div>
 
               {/* Link 1: Firm Accountant Tester Link */}
@@ -1981,7 +2018,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
                     className="flex items-center gap-1 px-3 py-1.5 bg-gray-900 hover:bg-black text-amber-300 font-bold rounded-xl text-xs shrink-0 shadow-xs"
                   >
                     <ExternalLink className="w-3.5 h-3.5" />
-                    <span>Open ↗</span>
+                    <span>Open in New Tab ↗</span>
                   </a>
                 </div>
               </div>
@@ -2036,7 +2073,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
                     className="flex items-center gap-1 px-3 py-1.5 bg-gray-900 hover:bg-black text-amber-300 font-bold rounded-xl text-xs shrink-0 shadow-xs"
                   >
                     <ExternalLink className="w-3.5 h-3.5" />
-                    <span>Open ↗</span>
+                    <span>Open in New Tab ↗</span>
                   </a>
                 </div>
               </div>

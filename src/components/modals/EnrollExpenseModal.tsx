@@ -49,6 +49,7 @@ export const EnrollExpenseModal: React.FC<EnrollExpenseModalProps> = ({
   );
 
   const [partnerId, setPartnerId] = useState<string>(partners[0]?.id || 'accountant');
+  const [paymentSource, setPaymentSource] = useState<'project_bank' | 'individual'>('project_bank');
   const [bankAccountId, setBankAccountId] = useState<string>(projectAccounts[0]?.id || '');
   const [amount, setAmount] = useState<number | ''>('');
   const [category, setCategory] = useState<ExpenseCategory>('Labor Wages');
@@ -94,11 +95,14 @@ export const EnrollExpenseModal: React.FC<EnrollExpenseModalProps> = ({
       taxInvoiceNo: taxInvoiceNo.trim() || undefined,
       vendorName: vendorName.trim() || undefined,
       paymentMode,
+      paymentSource,
+      bankAccountId: paymentSource === 'project_bank' ? (chosenAccount?.id || bankAccountId) : undefined,
+      bankAccountName: paymentSource === 'project_bank' ? chosenAccount?.accountName : 'Partner Individual Funds',
       hasVoiceNote: false,
       enrolledBy: enrolledName,
     };
 
-    onEnrollExpense(newExpense, chosenAccount?.id || undefined);
+    onEnrollExpense(newExpense, paymentSource === 'project_bank' ? (chosenAccount?.id || undefined) : undefined);
     onClose();
   };
 
@@ -131,39 +135,86 @@ export const EnrollExpenseModal: React.FC<EnrollExpenseModalProps> = ({
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="p-6 space-y-4 text-xs">
-          {/* Bank Account Selection: Debits Project Balance */}
-          <div className="bg-amber-50/70 rounded-2xl p-3.5 border border-amber-300">
-            <label className="block text-[11px] font-black text-amber-950 uppercase mb-1 flex items-center justify-between">
-              <span className="flex items-center gap-1.5">
-                <Landmark className="w-3.5 h-3.5 text-amber-700" />
-                <span>Debit From Bank Account (Reduces Project Balance) *</span>
-              </span>
-              {chosenAccount && (
-                <span className="font-mono text-[10px] text-amber-900 font-bold">
-                  Avail Bal: {formatINR(chosenAccount.currentBalance)}
-                </span>
-              )}
-            </label>
-            <select
-              value={bankAccountId || chosenAccount?.id}
-              onChange={(e) => setBankAccountId(e.target.value)}
-              className="w-full px-3 py-2.5 bg-white border border-amber-300 rounded-xl text-xs font-bold text-gray-950 focus:ring-2 focus:ring-amber-500 outline-none cursor-pointer"
-            >
-              {projectAccounts.length === 0 && (
-                <option value="">Cash Treasury / Site Imprest (General Treasury)</option>
-              )}
-              {projectAccounts.map((acc) => (
-                <option key={acc.id} value={acc.id}>
-                  {acc.bankName} - {acc.accountName} (A/C: ...{acc.accountNumber.slice(-4)}) — Bal: {formatINR(acc.currentBalance)}
-                </option>
-              ))}
-            </select>
-            {chosenAccount && numAmount > 0 && (
-              <div className="mt-2 flex items-center justify-between text-[11px] font-mono font-semibold text-amber-950 bg-white/80 p-2 rounded-lg border border-amber-200">
-                <span>Projected Treasury Bal After Debit:</span>
-                <span className={chosenAccount.currentBalance - numAmount < 0 ? 'text-rose-700 font-black' : 'text-emerald-700 font-black'}>
-                  {formatINR(chosenAccount.currentBalance - numAmount)} (-{formatINR(numAmount)})
-                </span>
+          {/* Payment Source: Project Bank vs Individual Personal Pocket */}
+          <div className="bg-amber-50/70 rounded-2xl p-3.5 border border-amber-300 space-y-3">
+            <div>
+              <label className="block text-[11px] font-black text-amber-950 uppercase mb-1.5 flex items-center justify-between">
+                <span>Payment Source (Who / Which Account Paid) *</span>
+                <span className="text-[10px] text-amber-800 font-bold">Wages / Site Outlays</span>
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPaymentSource('project_bank')}
+                  className={`py-2 px-3 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer border ${
+                    paymentSource === 'project_bank'
+                      ? 'bg-[#111827] text-white border-gray-900 shadow-sm'
+                      : 'bg-white text-gray-700 border-amber-200 hover:bg-amber-100/50'
+                  }`}
+                >
+                  <Landmark className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Project Bank A/C</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPaymentSource('individual')}
+                  className={`py-2 px-3 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer border ${
+                    paymentSource === 'individual'
+                      ? 'bg-[#111827] text-white border-gray-900 shadow-sm'
+                      : 'bg-white text-gray-700 border-amber-200 hover:bg-amber-100/50'
+                  }`}
+                >
+                  <User className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Individual / Partner Funds</span>
+                </button>
+              </div>
+            </div>
+
+            {paymentSource === 'project_bank' ? (
+              <div>
+                <label className="block text-[11px] font-black text-amber-950 uppercase mb-1 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Landmark className="w-3.5 h-3.5 text-amber-700" />
+                    <span>Select Project Bank Account to Debit *</span>
+                  </span>
+                  {chosenAccount && (
+                    <span className="font-mono text-[10px] text-amber-900 font-bold">
+                      Avail Bal: {formatINR(chosenAccount.currentBalance)}
+                    </span>
+                  )}
+                </label>
+                <select
+                  value={bankAccountId || chosenAccount?.id}
+                  onChange={(e) => setBankAccountId(e.target.value)}
+                  className="w-full px-3 py-2.5 bg-white border border-amber-300 rounded-xl text-xs font-bold text-gray-950 focus:ring-2 focus:ring-amber-500 outline-none cursor-pointer"
+                >
+                  {projectAccounts.length === 0 && (
+                    <option value="">Cash Treasury / Site Imprest (General Treasury)</option>
+                  )}
+                  {projectAccounts.map((acc) => (
+                    <option key={acc.id} value={acc.id}>
+                      {acc.bankName} - {acc.accountName} (A/C: ...{acc.accountNumber.slice(-4)}) — Bal: {formatINR(acc.currentBalance)}
+                    </option>
+                  ))}
+                </select>
+                {chosenAccount && numAmount > 0 && (
+                  <div className="mt-2 flex items-center justify-between text-[11px] font-mono font-semibold text-amber-950 bg-white/80 p-2 rounded-lg border border-amber-200">
+                    <span>Projected Treasury Bal After Debit:</span>
+                    <span className={chosenAccount.currentBalance - numAmount < 0 ? 'text-rose-700 font-black' : 'text-emerald-700 font-black'}>
+                      {formatINR(chosenAccount.currentBalance - numAmount)} (-{formatINR(numAmount)})
+                    </span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="p-2.5 bg-white/90 rounded-xl border border-amber-200 text-[11px] text-gray-700 space-y-1">
+                <div className="font-bold text-gray-900 flex items-center gap-1.5">
+                  <User className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Paid from {enrolledName}&apos;s Personal Pocket</span>
+                </div>
+                <p className="text-[10px] text-gray-500 leading-relaxed">
+                  Project bank balance will not be debited immediately. Recorded as partner reimbursable site expenditure in the consensus equity passbook.
+                </p>
               </div>
             )}
           </div>
