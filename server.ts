@@ -23,7 +23,9 @@ import {
   validateFirmCode,
   authenticateAppUser,
   changeUserPin,
-  getAppUsersList
+  getAppUsersList,
+  resetPartnerPinByAccountant,
+  togglePartnerStatusByAccountant
 } from './src/db/erp.ts';
 import { getUsers, getOrCreateUser } from './src/db/users.ts';
 
@@ -220,6 +222,26 @@ async function startServer() {
       res.json(saved);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/erp/partners/reset-pin', async (req, res) => {
+    try {
+      const { phone, partnerId } = req.body;
+      const result = await resetPartnerPinByAccountant(phone, partnerId);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.post('/api/erp/partners/toggle-status', async (req, res) => {
+    try {
+      const { phone, partnerId, status } = req.body;
+      const result = await togglePartnerStatusByAccountant(phone, partnerId, status);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
     }
   });
 

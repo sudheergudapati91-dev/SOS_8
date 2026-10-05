@@ -21,6 +21,7 @@ export const createPool = () => {
         connectionTimeoutMillis: 15000,
       });
     } else {
+      const isSocket = process.env.SQL_HOST && process.env.SQL_HOST.startsWith('/');
       const isAwsOrSsl = 
         (process.env.SQL_HOST && process.env.SQL_HOST.includes('amazonaws.com')) ||
         process.env.SQL_SSL === 'true';
@@ -31,7 +32,7 @@ export const createPool = () => {
         user: process.env.SQL_USER,
         password: process.env.SQL_PASSWORD,
         database: process.env.SQL_DB_NAME,
-        ssl: isAwsOrSsl ? { rejectUnauthorized: false } : undefined,
+        ssl: isSocket ? false : (isAwsOrSsl ? { rejectUnauthorized: false } : undefined),
         max: 10,
         connectionTimeoutMillis: 15000,
       });

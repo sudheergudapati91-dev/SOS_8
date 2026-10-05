@@ -314,8 +314,9 @@ export interface SyndicatePartner {
   stockDrawsValuation?: number; // Liquor barter / direct stock draw deductions
   officialDeclaredCapital?: number; // Declared in partnership deed & official banking
   userRole?: 'managing_partner' | 'field_partner' | 'site_supervisor' | 'investor_partner';
-  userStatus?: 'active' | 'pending' | 'suspended';
+  userStatus?: 'active' | 'inactive' | 'pending' | 'suspended';
   pinCode?: string; // 4-digit quick mobile authentication PIN for Field Partner login
+  mustChangePin?: boolean;
   dailySpendingLimit?: number; // Daily spot cash outlay limit (e.g. ₹50,000)
   addedDate?: string;
   addedBy?: string;

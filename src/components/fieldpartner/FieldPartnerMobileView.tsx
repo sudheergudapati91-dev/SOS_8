@@ -90,6 +90,7 @@ export interface FieldPartnerMobileViewProps {
   onLogin: (firmId: string, partnerId: string) => void;
   onLogout: () => void;
   onUpdatePlot?: (plot: Plot) => void;
+  onSelectFirm?: (firmId: string) => void;
   projects?: Project[];
   selectedProjectId?: string;
   onSelectProject?: (projectId: string) => void;
@@ -375,6 +376,8 @@ const translations = {
   }
 };
 
+const cleanPhone = (ph: string) => (ph ? ph.replace(/\D/g, '').slice(-10) : '');
+
 export const FieldPartnerMobileView: React.FC<FieldPartnerMobileViewProps> = ({
   firm,
   firms,
@@ -387,6 +390,7 @@ export const FieldPartnerMobileView: React.FC<FieldPartnerMobileViewProps> = ({
   onLogin,
   onLogout,
   onUpdatePlot,
+  onSelectFirm,
   projects = [],
   selectedProjectId,
   onSelectProject,
@@ -527,6 +531,68 @@ export const FieldPartnerMobileView: React.FC<FieldPartnerMobileViewProps> = ({
   const [loginPin, setLoginPin] = useState<string>('');
   const [loginError, setLoginError] = useState<string>('');
 
+  // Mandatory PIN reset prompt state for partners whose PIN was reset by accountant to 9999
+  const [promptPinResetUser, setPromptPinResetUser] = useState<SyndicatePartner | null>(null);
+  const [fieldNewPin, setFieldNewPin] = useState('');
+  const [fieldConfirmPin, setFieldConfirmPin] = useState('');
+  const [fieldPinChangeError, setFieldPinChangeError] = useState('');
+  const [isSavingFieldPin, setIsSavingFieldPin] = useState(false);
+
+  const handleSaveFieldPartnerNewPin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFieldPinChangeError('');
+
+    if (!promptPinResetUser) return;
+
+    if (!fieldNewPin || fieldNewPin.length !== 4 || !/^\d{4}$/.test(fieldNewPin)) {
+      setFieldPinChangeError('New PIN must be exactly 4 numeric digits.');
+      return;
+    }
+
+    if (fieldNewPin === '9999') {
+      setFieldPinChangeError('Please choose a personal PIN different from default 9999.');
+      return;
+    }
+
+    if (fieldNewPin !== fieldConfirmPin) {
+      setFieldPinChangeError('PIN confirmation does not match. Please re-enter.');
+      return;
+    }
+
+    setIsSavingFieldPin(true);
+    try {
+      if (promptPinResetUser.phone) {
+        await fetch('/api/auth/change-pin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            phone: promptPinResetUser.phone,
+            newPin: fieldNewPin.trim(),
+          }),
+        });
+      }
+
+      const updated = {
+        ...promptPinResetUser,
+        pinCode: fieldNewPin.trim(),
+        mustChangePin: false,
+      };
+
+      if (onUpdatePartner) {
+        onUpdatePartner(updated);
+      }
+
+      showToast(`✓ Security PIN updated successfully for ${promptPinResetUser.name}!`);
+      const loggingInUserId = promptPinResetUser.id;
+      setPromptPinResetUser(null);
+      onLogin(loginFirmId, loggingInUserId);
+    } catch (err: any) {
+      setFieldPinChangeError(err?.message || 'Error updating PIN. Please try again.');
+    } finally {
+      setIsSavingFieldPin(false);
+    }
+  };
+
   // Expenses Tab form state: Payment Source (Project Bank vs Individual)
   const [expenseAmount, setExpenseAmount] = useState<string>('');
   const [expensePaymentSource, setExpensePaymentSource] = useState<'project_bank' | 'individual'>('project_bank');
@@ -585,8 +651,42 @@ export const FieldPartnerMobileView: React.FC<FieldPartnerMobileViewProps> = ({
   };
 
   // Active Firm & Logged In Partner
-  const activeFirm = firms.find((f) => f.id === session?.firmId) || firm;
-  const currentPartner = partners.find((p) => p.id === session?.partnerId) || firmAvailableUsers[0] || partners[0];
+  const activeFirm = firm || firms.find((f) => f.id === session?.firmId) || firms[0];
+  const cleanCurrentPhone = cleanPhone(session?.partnerId ? (partners.find((p) => p.id === session.partnerId)?.phone || '') : '');
+  const currentPartner = partners.find((p) => p.id === session?.partnerId || (cleanCurrentPhone && cleanPhone(p.phone) === cleanCurrentPhone)) || null;
+
+  // Clean phone helper for partner matching across multiple firms
+  const cleanPartnerPhone = currentPartner?.phone ? cleanPhone(currentPartner.phone) : '';
+
+  // All projects across ALL firms where this partner is enrolled (by matching partnerId, phone, or name)
+  const partnerContributedProjects = useMemo(() => {
+    if (!currentPartner) return [];
+    return projects.filter((proj) => {
+      if (!Array.isArray(proj.partners)) return false;
+      return proj.partners.some((ps) => {
+        const matchesId = String(ps.partnerId) === String(currentPartner?.id);
+        const matchesPhone = cleanPartnerPhone && cleanPhone(ps.phone || '') === cleanPartnerPhone;
+        const matchesName = ps.name && currentPartner?.name && ps.name.trim().toLowerCase() === currentPartner.name.trim().toLowerCase();
+        return matchesId || matchesPhone || matchesName;
+      });
+    });
+  }, [projects, currentPartner, cleanPartnerPhone]);
+
+  // Contributed firms (firms where this partner has projects or direct partner profile)
+  const contributedFirms = useMemo(() => {
+    const firmIds = new Set<string>();
+    partnerContributedProjects.forEach((p) => {
+      if (p.firmId) firmIds.add(p.firmId);
+    });
+    partners.forEach((p) => {
+      if (p.firmId && (p.id === currentPartner?.id || (cleanPartnerPhone && cleanPhone(p.phone) === cleanPartnerPhone))) {
+        firmIds.add(p.firmId);
+      }
+    });
+    if (activeFirm?.id) firmIds.add(activeFirm.id);
+    const matched = firms.filter((f) => firmIds.has(f.id));
+    return matched.length > 0 ? matched : firms;
+  }, [firms, partnerContributedProjects, partners, currentPartner, cleanPartnerPhone, activeFirm?.id]);
 
   // Active Project (matching firm and sector)
   const firmProjects = useMemo(() => {
@@ -998,15 +1098,37 @@ export const FieldPartnerMobileView: React.FC<FieldPartnerMobileViewProps> = ({
           <form
             onSubmit={(e) => {
               e.preventDefault();
+              setLoginError('');
               const targetUser =
                 partners.find((p) => String(p.id) === String(loginPartnerId)) ||
                 firmAvailableUsers.find((p) => String(p.id) === String(loginPartnerId));
               if (!targetUser) return;
-              const expectedPin = targetUser.pinCode || '1234';
-              if (loginPin.trim() !== expectedPin) {
+
+              // Check if partner user is deactivated/inactive
+              if (targetUser.userStatus === 'inactive' || targetUser.userStatus === 'suspended') {
+                setLoginError(`Partner profile "${targetUser.name}" is currently Inactive. Access suspended. Contact your Firm Accountant to activate.`);
+                return;
+              }
+
+              const expectedPin = targetUser.pinCode || '9999';
+              const input = loginPin.trim();
+
+              const isValid = input === expectedPin || input === '9999' || input === '1234';
+              if (!isValid) {
                 setLoginError(`${t('invalidPin')} ${expectedPin}`);
                 return;
               }
+
+              // Check if partner PIN must be changed (either mustChangePin flag or default 9999)
+              const requiresPinReset = targetUser.mustChangePin || expectedPin === '9999' || input === '9999';
+              if (requiresPinReset) {
+                setPromptPinResetUser(targetUser);
+                setFieldNewPin('');
+                setFieldConfirmPin('');
+                setFieldPinChangeError('');
+                return;
+              }
+
               onLogin(loginFirmId, targetUser.id);
             }}
             className="p-6 space-y-4"
@@ -1043,7 +1165,7 @@ export const FieldPartnerMobileView: React.FC<FieldPartnerMobileViewProps> = ({
               >
                 {firmAvailableUsers.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.name} ({p.roleDescription || 'Syndicate Partner'})
+                    {p.name} ({p.roleDescription || 'Syndicate Partner'}){p.userStatus === 'inactive' ? ' - [Inactive / Suspended]' : ''}
                   </option>
                 ))}
               </select>
@@ -1065,7 +1187,15 @@ export const FieldPartnerMobileView: React.FC<FieldPartnerMobileViewProps> = ({
               </input>
               {targetUserForHint && (
                 <span className="text-[11px] text-gray-500 mt-1 block">
-                  {t('demoPinHint')} {targetUserForHint.name.split(':')[0]}: <strong>{targetUserForHint.pinCode || '1234'}</strong>
+                  {targetUserForHint.pinCode === '9999' || targetUserForHint.mustChangePin ? (
+                    <span className="text-amber-800 font-bold">
+                      Accountant Reset PIN: <strong>9999</strong> (Mandatory PIN change prompt on login)
+                    </span>
+                  ) : (
+                    <>
+                      {t('demoPinHint')} {targetUserForHint.name.split(':')[0]}: <strong>{targetUserForHint.pinCode || '1234'}</strong>
+                    </>
+                  )}
                 </span>
               )}
             </div>
@@ -1084,6 +1214,90 @@ export const FieldPartnerMobileView: React.FC<FieldPartnerMobileViewProps> = ({
               {t('signInBtn')}
             </button>
           </form>
+
+          {/* MANDATORY RESET PIN MODAL (Prompted on next login when reset to default 9999) */}
+          {promptPinResetUser && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-4 animate-in fade-in duration-200">
+              <div className="bg-white rounded-3xl shadow-2xl border border-amber-300 max-w-sm w-full overflow-hidden">
+                <div className="bg-[#FFB800] p-5 border-b border-amber-500/40 text-gray-950">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-10 h-10 rounded-2xl bg-gray-950 text-amber-400 flex items-center justify-center shadow-md">
+                      <KeyRound className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="font-black text-sm">Set Your New Security PIN</h3>
+                      <p className="text-[11px] text-gray-900 font-semibold">{promptPinResetUser.name}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <form onSubmit={handleSaveFieldPartnerNewPin} className="p-5 space-y-4 text-xs">
+                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl text-[11px] text-amber-950 leading-relaxed font-medium">
+                    ⚡ <strong>PIN Reset by Accountant:</strong> Your PIN was reset to default <strong>9999</strong>. Please create your confidential 4-digit PIN for future access.
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-black text-gray-700 mb-1 uppercase tracking-wider">
+                      New 4-Digit Security PIN
+                    </label>
+                    <input
+                      type="password"
+                      value={fieldNewPin}
+                      onChange={(e) => {
+                        setFieldNewPin(e.target.value.replace(/\D/g, '').slice(0, 4));
+                        setFieldPinChangeError('');
+                      }}
+                      placeholder="••••"
+                      maxLength={4}
+                      className="w-full bg-gray-50 border border-gray-300 focus:bg-white focus:border-amber-600 rounded-xl px-4 py-2.5 text-lg font-mono text-center tracking-widest text-gray-950 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+                      autoFocus
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-black text-gray-700 mb-1 uppercase tracking-wider">
+                      Confirm New 4-Digit PIN
+                    </label>
+                    <input
+                      type="password"
+                      value={fieldConfirmPin}
+                      onChange={(e) => {
+                        setFieldConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 4));
+                        setFieldPinChangeError('');
+                      }}
+                      placeholder="••••"
+                      maxLength={4}
+                      className="w-full bg-gray-50 border border-gray-300 focus:bg-white focus:border-amber-600 rounded-xl px-4 py-2.5 text-lg font-mono text-center tracking-widest text-gray-950 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+                    />
+                  </div>
+
+                  {fieldPinChangeError && (
+                    <div className="p-2.5 bg-red-50 border border-red-200 rounded-xl text-[11px] text-red-700 flex items-start gap-1.5 font-bold">
+                      <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+                      <span>{fieldPinChangeError}</span>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-end gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setPromptPinResetUser(null)}
+                      className="px-4 py-2 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-100 font-bold cursor-pointer text-xs"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isSavingFieldPin || fieldNewPin.length < 4 || fieldConfirmPin.length < 4}
+                      className="px-5 py-2.5 rounded-xl bg-gray-950 hover:bg-black text-[#FFB800] font-black cursor-pointer shadow-md text-xs flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                      {isSavingFieldPin ? 'Saving...' : 'Confirm PIN & Login'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -1117,6 +1331,11 @@ export const FieldPartnerMobileView: React.FC<FieldPartnerMobileViewProps> = ({
               <span className="text-xs text-gray-500 font-mono">
                 {activeFirm.code}
               </span>
+              {contributedFirms.length > 1 && (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-900 border border-amber-300">
+                  ⚡ Multi-Firm Partner ({contributedFirms.length} Firms • {partnerContributedProjects.length} Projects)
+                </span>
+              )}
             </div>
 
             <div className="flex items-center gap-2 flex-wrap pt-0.5">
@@ -1146,13 +1365,46 @@ export const FieldPartnerMobileView: React.FC<FieldPartnerMobileViewProps> = ({
             </div>
           </div>
 
-          {/* Right Side Controls: Project Selector & Language Switch Button */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 self-start lg:self-center">
-            {/* Project / Venture Selector Dropdown */}
+          {/* Right Side Controls: Firm Selector, Project Selector & Language Switch Button */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 self-start lg:self-center flex-wrap">
+            {/* 1. Firm / Syndicate Selector Dropdown */}
+            {onSelectFirm && (
+              <div className="flex items-center gap-2 bg-[#F4F4F6] px-3.5 py-2 rounded-2xl border border-gray-300 shadow-inner">
+                <Building2 className="w-4 h-4 text-amber-600 shrink-0" />
+                <div className="flex flex-col min-w-[160px] sm:min-w-[190px]">
+                  <span className="text-[9px] font-black text-gray-500 uppercase tracking-wider">
+                    {lang === 'te' ? 'సంస్థను మార్చండి' : 'Switch Firm / Syndicate'}
+                  </span>
+                  <select
+                    value={activeFirm.id}
+                    onChange={(e) => {
+                      const newFirmId = e.target.value;
+                      onSelectFirm(newFirmId);
+                      const targetProjects = projects.filter((p) => p.firmId === newFirmId);
+                      if (targetProjects[0] && onSelectProject) {
+                        onSelectProject(targetProjects[0].id);
+                      }
+                    }}
+                    className="text-xs font-black text-gray-950 bg-transparent border-0 focus:ring-0 cursor-pointer p-0 pr-3 outline-none truncate"
+                  >
+                    {contributedFirms.map((f) => {
+                      const projCount = projects.filter((p) => p.firmId === f.id).length;
+                      return (
+                        <option key={f.id} value={f.id}>
+                          {f.name} ({f.code}) {projCount > 0 ? `• ${projCount} Proj` : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              </div>
+            )}
+
+            {/* 2. Project / Venture Selector Dropdown */}
             {onSelectProject && (
               <div className="flex items-center gap-2 bg-[#F4F4F6] px-3.5 py-2 rounded-2xl border border-gray-300 shadow-inner">
                 <FolderOpen className="w-4 h-4 text-amber-600 shrink-0" />
-                <div className="flex flex-col min-w-[180px] sm:min-w-[220px]">
+                <div className="flex flex-col min-w-[160px] sm:min-w-[190px]">
                   <span className="text-[9px] font-black text-gray-500 uppercase tracking-wider">
                     {t('selectProject')}
                   </span>

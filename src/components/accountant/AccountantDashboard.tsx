@@ -270,8 +270,9 @@ export const AccountantDashboard: React.FC<AccountantDashboardProps> = ({
             userRole: ps.roleInProject.toLowerCase().includes('managing')
               ? 'managing_partner'
               : (master?.userRole || 'field_partner'),
-            userStatus: 'active',
-            pinCode: master?.pinCode || '1234',
+            userStatus: (master?.userStatus as any) || (ps as any).userStatus || 'active',
+            pinCode: master?.pinCode || (ps as any).pinCode || '9999',
+            mustChangePin: master?.mustChangePin ?? (ps as any).mustChangePin ?? (master?.pinCode === '9999' || (ps as any).pinCode === '9999'),
             dailySpendingLimit: master?.dailySpendingLimit || 50000,
           };
         })
@@ -361,10 +362,12 @@ export const AccountantDashboard: React.FC<AccountantDashboardProps> = ({
   const projectedRoiPercent =
     activeProjectCost > 0 ? Math.round((projectedSurplus / activeProjectCost) * 100) : 0;
 
-  // Project Bank Accounts - strictly scoped to active project
+  // Project Accounts - strictly scoped to active project + shared cash account
   const projectAccounts = activeProject
     ? firmAccounts.filter(
-        (acc) => acc.firmId === firm.id && acc.linkedProjectId === activeProject.id
+        (acc) =>
+          acc.firmId === firm.id &&
+          (acc.linkedProjectId === activeProject.id || acc.accountType === 'field_petty_cash')
       )
     : [];
   const totalProjectLiquidity = projectAccounts.reduce((sum, acc) => sum + (acc.currentBalance || 0), 0);

@@ -8,15 +8,11 @@
     ],
     "rewrites": [
       {
-        "source": "/api/**",
-        "run": {
-          "serviceId": "ais-pre-5fj3jmozap7w66m7feycqq-39618832855",
-          "region": "asia-east1"
-        }
-      },
-      {
         "source": "**",
-        "destination": "/index.html"
+        "run": {
+          "serviceId": "sos-erp",
+          "region": "asia-south1"
+        }
       }
     ]
   }

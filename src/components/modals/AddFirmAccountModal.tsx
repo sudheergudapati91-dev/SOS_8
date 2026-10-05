@@ -51,7 +51,10 @@ export const AddFirmAccountModal: React.FC<AddFirmAccountModalProps> = ({
   onAddAccount,
 }) => {
   const firmProjects = projects.filter((p) => p.firmId === firm.id);
-  const currentProject = projects.find((p) => p.id === activeProjectId);
+  const [targetProjectId, setTargetProjectId] = useState<string>(
+    activeProjectId || firmProjects[0]?.id || ''
+  );
+  const currentProject = projects.find((p) => p.id === (targetProjectId || activeProjectId));
 
   const [accountName, setAccountName] = useState('');
   const [bankName, setBankName] = useState('State Bank of India');
@@ -123,7 +126,12 @@ export const AddFirmAccountModal: React.FC<AddFirmAccountModalProps> = ({
       }
     }
 
-    const resolvedProjectId = activeProjectId || firmProjects[0]?.id || '';
+    const resolvedProjectId = targetProjectId || activeProjectId || '';
+
+    if (accountType !== 'field_petty_cash' && firmProjects.length > 0 && !resolvedProjectId) {
+      setError('Please select which Project this bank account belongs to.');
+      return;
+    }
 
     const newAccount: FirmAccount = {
       id: `acc-${firm.code.toLowerCase().replace(/[^a-z0-9]/g, '-')}-${Date.now().toString().slice(-5)}`,
@@ -201,6 +209,44 @@ export const AddFirmAccountModal: React.FC<AddFirmAccountModalProps> = ({
             <div className="p-4 rounded-2xl bg-red-50 border border-red-200 flex items-start gap-3 text-red-900 text-xs font-medium">
               <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
               <span>{error}</span>
+            </div>
+          )}
+
+          {/* Associated Project Designation */}
+          {firmProjects.length > 0 && (
+            <div className="bg-gray-50/80 rounded-2xl p-4 border border-gray-200 space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-black uppercase tracking-wider text-gray-900 flex items-center gap-1.5">
+                  <Building2 className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Designated Project / Venture</span>
+                </label>
+                <span className="text-[10px] font-bold text-gray-500 uppercase">Strict Project Isolation</span>
+              </div>
+              <select
+                value={targetProjectId}
+                onChange={(e) => {
+                  setTargetProjectId(e.target.value);
+                  const selectedProj = projects.find((p) => p.id === e.target.value);
+                  if (selectedProj && (!accountName || accountName.includes(' - '))) {
+                    const typeLabel =
+                      accountType === 'rera_escrow' ? 'RERA Escrow' :
+                      accountType === 'syndicate_capital_pool' ? 'Syndicate Capital Pool' :
+                      accountType === 'current_operational' ? 'Current Operational' :
+                      accountType === 'field_petty_cash' ? 'Site Petty Cash Treasury' : 'Tax & Statutory';
+                    setAccountName(`${bankName === 'Syndicate Cash Vault' ? 'Field Cash Vault' : bankName} ${typeLabel} - ${selectedProj.code}`);
+                  }
+                }}
+                className="w-full px-3.5 py-2.5 bg-white border border-gray-300 rounded-xl text-xs font-bold text-gray-950 focus:ring-2 focus:ring-[#FFB800] outline-none"
+              >
+                {firmProjects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    [{p.code}] {p.name}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-gray-500">
+                All bank accounts and escrows belong strictly to their designated project.
+              </p>
             </div>
           )}
 

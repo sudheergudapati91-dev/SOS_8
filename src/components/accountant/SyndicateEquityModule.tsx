@@ -25,8 +25,16 @@ import {
   Share2,
   Copy,
   Check,
-  Smartphone
+  Smartphone,
+  KeyRound,
+  CheckCircle2,
+  AlertCircle,
+  RotateCcw
 } from 'lucide-react';
+import {
+  resetPartnerPinInSql,
+  togglePartnerStatusInSql
+} from '../../services/sqlSync';
 
 interface SyndicateEquityModuleProps {
   firm: TenantFirm;
@@ -79,34 +87,62 @@ export const SyndicateEquityModule: React.FC<SyndicateEquityModuleProps> = ({
   const [newPartnerCapital, setNewPartnerCapital] = useState<number>(0);
   const [newPartnerPin, setNewPartnerPin] = useState('1234');
   const [addPartnerError, setAddPartnerError] = useState('');
-  const [copiedPartnerId, setCopiedPartnerId] = useState<string | null>(null);
 
-  const getPartnerInviteUrl = (partner?: SyndicatePartner) => {
-    if (typeof window !== 'undefined') {
-      let origin = window.location.origin;
-      if (origin.includes('ais-dev-')) {
-        origin = origin.replace('ais-dev-', 'ais-pre-');
-      }
-      const projParam = project ? `&venture=${encodeURIComponent(project.id)}` : '';
-      const partParam = partner ? `&partnerId=${encodeURIComponent(partner.id)}` : '';
-      return `${origin}${window.location.pathname}?role=field_partner&firmId=${firm.id}${projParam}${partParam}&standalone=true`;
+  // Partner Reset PIN and Active/Inactive Status State
+  const [partnerForPinReset, setPartnerForPinReset] = useState<SyndicatePartner | null>(null);
+  const [isResettingPin, setIsResettingPin] = useState(false);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(null), 4000);
+  };
+
+  const handleConfirmPinReset = async (targetPartner: SyndicatePartner) => {
+    setIsResettingPin(true);
+    try {
+      const updated: SyndicatePartner = {
+        ...targetPartner,
+        pinCode: '9999',
+        mustChangePin: true,
+      };
+
+      onUpdatePartner(updated);
+      await resetPartnerPinInSql(targetPartner.phone, targetPartner.id);
+
+      setPartnerForPinReset(null);
+      showToast(`✓ PIN for ${targetPartner.name} reset to default 9999. User will be prompted to set a new PIN on next login.`);
+    } catch (err) {
+      showToast('Error resetting PIN. Please try again.');
+    } finally {
+      setIsResettingPin(false);
     }
-    return '';
   };
 
-  const copyPartnerInvite = (partner: SyndicatePartner) => {
-    const portalUrl = getPartnerInviteUrl(partner);
-    const pin = partner.pinCode || '1234';
-    const text = `📱 SyndicateOS Partner Access\n🏢 Firm: ${firm.name} (${firm.code})\n📁 Project: ${project ? `${project.name} (${project.code})` : 'General Venture'}\n👤 Partner: ${partner.name}\n📞 Mobile: ${partner.phone}\n\n🔗 Partner Mobile Portal Link:\n${portalUrl}\n\n🔑 Your Login Security PIN: ${pin}\n\n👉 Instructions: Open the link to directly access your real-time equity passbook for ${project ? project.name : firm.name}, verify capital investments, and log field expenses.`;
-    navigator.clipboard.writeText(text);
-    setCopiedPartnerId(partner.id);
-    setTimeout(() => setCopiedPartnerId(null), 2500);
+  const handleTogglePartnerStatus = async (targetPartner: SyndicatePartner) => {
+    const newStatus: 'active' | 'inactive' = targetPartner.userStatus === 'inactive' ? 'active' : 'inactive';
+    const updated: SyndicatePartner = {
+      ...targetPartner,
+      userStatus: newStatus,
+    };
+
+    onUpdatePartner(updated);
+    await togglePartnerStatusInSql(targetPartner.phone, targetPartner.id, newStatus);
+
+    showToast(
+      newStatus === 'active'
+        ? `✓ ${targetPartner.name} marked as ACTIVE. Access restored.`
+        : `⚠ ${targetPartner.name} marked as INACTIVE. Access suspended.`
+    );
   };
 
-  // Filter partners and expenses belonging strictly to this firm
-  const firmPartners = partners.filter(
-    (p) => p.firmId === firm.id || (!p.firmId && firm.id === 'firm-1')
-  );
+  // Filter partners and expenses belonging strictly to this firm (or active project partners)
+  const firmPartners = useMemo(() => {
+    if (project && partners.length > 0) return partners;
+    return partners.filter(
+      (p) => p.firmId === firm.id || (!p.firmId && firm.id === 'firm-1')
+    );
+  }, [partners, project, firm.id]);
 
   // Auto-calculate dynamic actual invested capital for each partner:
   // 1. Initial actual capital explicitly enrolled/deposited (partner.actualInvested || 0)
@@ -430,7 +466,7 @@ export const SyndicateEquityModule: React.FC<SyndicateEquityModuleProps> = ({
                 <th className="pb-3 px-3">Expected Profit as per Share for this Project</th>
                 <th className="pb-3 px-3">Drawings (₹)</th>
                 <th className="pb-3 px-3">Net Balance (₹)</th>
-                <th className="pb-3 px-3 text-right">Adjust</th>
+                <th className="pb-3 px-3 text-right min-w-[270px]">Actions (Status & PIN)</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -492,19 +528,37 @@ export const SyndicateEquityModule: React.FC<SyndicateEquityModuleProps> = ({
                         >
                           {partner.name.split(':')[0].replace('Partner ', '')}
                         </div>
-                        <div>
-                          <div className="font-bold text-gray-900 flex items-center gap-1.5">
-                            <span>{partner.name}</span>
+                        <div className="min-w-0">
+                          <div className="font-bold text-gray-950 flex items-center gap-1.5 flex-wrap">
+                            <span className="text-xs font-black">{partner.name}</span>
                             {partner.pinCode && (
-                              <span className="text-[9px] px-1.5 py-0.2 bg-amber-100 text-amber-900 border border-amber-300 font-mono font-bold rounded-md" title={`Field Login PIN: ${partner.pinCode}`}>
+                              <span
+                                className={`text-[9px] px-1.5 py-0.5 border font-mono font-bold rounded-md ${
+                                  partner.mustChangePin || partner.pinCode === '9999'
+                                    ? 'bg-amber-100 text-amber-900 border-amber-300'
+                                    : 'bg-stone-100 text-stone-800 border-stone-300'
+                                }`}
+                                title={`Field Login PIN: ${partner.pinCode}`}
+                              >
                                 PIN: {partner.pinCode}
+                                {partner.mustChangePin || partner.pinCode === '9999' ? ' (Reset Req)' : ''}
+                              </span>
+                            )}
+                            {partner.userStatus === 'inactive' && (
+                              <span className="text-[9px] px-1.5 py-0.5 bg-rose-100 text-rose-800 border border-rose-300 font-black rounded-md">
+                                Inactive
                               </span>
                             )}
                           </div>
-                          <div className="text-[11px] text-gray-500 flex items-center gap-1.5">
-                            <span>{partner.roleDescription}</span>
-                            <span className="text-gray-300">•</span>
-                            <span className="font-mono text-[10px] text-gray-600">{partner.phone}</span>
+                          <div className="text-[11px] text-gray-500 font-medium truncate">
+                            {partner.roleDescription}
+                          </div>
+                          <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-amber-50 border border-amber-300 font-mono text-[11px] font-bold text-amber-950" title="Partner Login Mobile (Unique User ID)">
+                              <Smartphone className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                              <span className="text-[9px] uppercase tracking-wider text-amber-800 font-black">User ID:</span>
+                              <span>{partner.phone || 'No Mobile Registered'}</span>
+                            </span>
                           </div>
                         </div>
                       </div>
@@ -618,30 +672,51 @@ export const SyndicateEquityModule: React.FC<SyndicateEquityModuleProps> = ({
                       </div>
                     </td>
 
-                    {/* Action */}
+                    {/* Actions Column: Active/Inactive, Reset PIN, Adjust */}
                     <td className="py-3.5 px-3 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
+                      <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                        {/* 1. Active / Inactive Partner Status Toggle */}
                         <button
                           type="button"
-                          onClick={() => copyPartnerInvite(partner)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-100 hover:bg-amber-200 text-amber-950 rounded-full border border-amber-300 text-[11px] font-bold transition-all cursor-pointer shadow-2xs"
-                          title="Copy Partner Mobile Portal Link & Login PIN to send via WhatsApp or SMS"
+                          onClick={() => handleTogglePartnerStatus(partner)}
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-black transition-all cursor-pointer border shadow-2xs ${
+                            partner.userStatus === 'inactive'
+                              ? 'bg-rose-50 text-rose-700 border-rose-300 hover:bg-rose-100'
+                              : 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
+                          }`}
+                          title={
+                            partner.userStatus === 'inactive'
+                              ? 'Partner is currently Inactive. Click to Activate'
+                              : 'Partner is currently Active. Click to Deactivate'
+                          }
                         >
-                          {copiedPartnerId === partner.id ? (
-                            <>
-                              <Check className="w-3 h-3 text-emerald-800" />
-                              <span>Copied!</span>
-                            </>
-                          ) : (
-                            <>
-                              <Share2 className="w-3 h-3 text-amber-800" />
-                              <span>Login Invite</span>
-                            </>
-                          )}
+                          <span
+                            className={`w-2 h-2 rounded-full shrink-0 ${
+                              partner.userStatus === 'inactive'
+                                ? 'bg-rose-500'
+                                : 'bg-emerald-500 animate-pulse'
+                            }`}
+                          />
+                          <span>{partner.userStatus === 'inactive' ? 'Inactive' : 'Active'}</span>
                         </button>
+
+                        {/* 2. Reset PIN Button */}
                         <button
+                          type="button"
+                          onClick={() => setPartnerForPinReset(partner)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-950 rounded-xl border border-amber-300 text-[11px] font-black transition-all cursor-pointer shadow-2xs"
+                          title="Reset security PIN to default 9999. Partner will automatically get prompted to reset PIN on next login."
+                        >
+                          <KeyRound className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                          <span>Reset PIN (9999)</span>
+                        </button>
+
+                        {/* 3. Adjust Ledger Button */}
+                        <button
+                          type="button"
                           onClick={() => setSelectedPartnerForAdjust({ ...partner })}
-                          className="px-3 py-1 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-full border border-gray-300 text-[11px] font-bold transition-all cursor-pointer"
+                          className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl border border-gray-300 text-xs font-bold transition-all cursor-pointer shadow-2xs"
+                          title="Adjust Capital & Equity Parameters"
                         >
                           Adjust
                         </button>
@@ -656,6 +731,75 @@ export const SyndicateEquityModule: React.FC<SyndicateEquityModuleProps> = ({
         </div>
 
       </div>
+
+      {/* RESET PIN CONFIRMATION MODAL */}
+      {partnerForPinReset && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl border border-amber-300 max-w-sm w-full overflow-hidden">
+            <div className="bg-gradient-to-r from-amber-400 to-[#FFB800] p-5 border-b border-amber-500/40 text-gray-950">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-gray-950 text-amber-400 flex items-center justify-center shadow-md">
+                  <KeyRound className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-sm">Reset Partner PIN</h3>
+                  <p className="text-[11px] text-gray-900 font-semibold">{partnerForPinReset.name}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-5 space-y-4 text-xs">
+              <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-2xl space-y-2">
+                <div className="flex items-center justify-between text-[11px] font-mono">
+                  <span className="text-gray-600">Partner User ID (Mobile):</span>
+                  <strong className="text-gray-950 font-bold">{partnerForPinReset.phone}</strong>
+                </div>
+                <div className="flex items-center justify-between text-[11px] font-mono">
+                  <span className="text-gray-600">New Default PIN:</span>
+                  <span className="px-2.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 font-black text-xs font-mono">9999</span>
+                </div>
+              </div>
+
+              <div className="text-gray-600 leading-relaxed text-[11px] bg-gray-50 p-3 rounded-xl border border-gray-200">
+                <p className="font-bold text-gray-900 mb-1">
+                  ⚡ Accountant PIN Reset Procedure:
+                </p>
+                <ul className="list-disc pl-4 space-y-1 text-gray-700">
+                  <li>Partner PIN will automatically reset to <strong>9999</strong>.</li>
+                  <li>On their next login, the partner will be <strong>automatically prompted to set a new PIN</strong> before entering the portal.</li>
+                </ul>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setPartnerForPinReset(null)}
+                  className="px-4 py-2 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-100 font-bold cursor-pointer text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleConfirmPinReset(partnerForPinReset)}
+                  disabled={isResettingPin}
+                  className="px-4 py-2 rounded-xl bg-gray-950 hover:bg-black text-[#FFB800] font-black cursor-pointer shadow-md text-xs flex items-center gap-1.5"
+                >
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <span>{isResettingPin ? 'Resetting...' : 'Confirm Reset (9999)'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TOAST NOTIFICATION */}
+      {toastMsg && (
+        <div className="fixed top-5 right-5 z-60 bg-gray-950 border-2 border-[#FFB800] text-white px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-2.5 text-xs animate-in slide-in-from-top-3">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          <span className="font-bold">{toastMsg}</span>
+        </div>
+      )}
 
       {/* ADJUST PARTNER MODAL */}
       {selectedPartnerForAdjust && (
@@ -861,21 +1005,26 @@ export const SyndicateEquityModule: React.FC<SyndicateEquityModuleProps> = ({
                   setAddPartnerError('Please provide a partner name.');
                   return;
                 }
+                const cleanPhoneDigits = newPartnerPhone.replace(/\D/g, '').slice(-10);
+                if (!cleanPhoneDigits || cleanPhoneDigits.length < 10) {
+                  setAddPartnerError('Please provide a valid 10-digit mobile number. The mobile number serves as the partner User ID.');
+                  return;
+                }
                 const newPartner: SyndicatePartner = {
                   id: `partner-${Date.now()}`,
                   firmId: firm.id,
                   name: newPartnerName.trim(),
-                  phone: newPartnerPhone.trim(),
-                  roleDescription: newPartnerRole.trim(),
+                  phone: cleanPhoneDigits,
+                  roleDescription: newPartnerRole.trim() || 'Syndicate Partner',
                   avatarColor: 'bg-indigo-600',
                   initialCapital: Number(newPartnerCapital) || 0,
                   actualInvested: Number(newPartnerCapital) || 0,
                   fixedEquityPercent: Number(newPartnerEquity) || 0,
                   drawings: 0,
                   shareOfFieldExpenses: 0,
-                  userRole: newPartnerRole.toLowerCase().includes('managing') ? 'managing_partner' : 'field_partner',
+                  userRole: 'field_partner',
                   userStatus: 'active',
-                  pinCode: newPartnerPin || '1234',
+                  pinCode: newPartnerPin || '9999',
                   dailySpendingLimit: 50000,
                 };
                 if (onAddPartnerMember) {
@@ -905,11 +1054,11 @@ export const SyndicateEquityModule: React.FC<SyndicateEquityModuleProps> = ({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-gray-700 font-bold mb-1">Mobile Phone *</label>
+                  <label className="block text-gray-700 font-bold mb-1">Mobile Number (User ID) *</label>
                   <input
-                    type="text"
+                    type="tel"
                     required
-                    placeholder="+91 98480 12345"
+                    placeholder="10-digit mobile (e.g. 9848012345)"
                     value={newPartnerPhone}
                     onChange={(e) => setNewPartnerPhone(e.target.value)}
                     className="w-full bg-gray-50 border border-gray-300 rounded-xl p-2.5 text-xs font-mono font-bold text-gray-950 focus:bg-white focus:border-amber-500 outline-none"
@@ -918,15 +1067,15 @@ export const SyndicateEquityModule: React.FC<SyndicateEquityModuleProps> = ({
                 <div>
                   <label className="block text-gray-700 font-bold mb-1">Field Login PIN *</label>
                   <input
-                    type="text"
+                    type="password"
                     maxLength={4}
-                    placeholder="1234"
+                    placeholder="9999"
                     value={newPartnerPin}
                     onChange={(e) => setNewPartnerPin(e.target.value)}
                     className="w-full bg-gray-50 border border-gray-300 rounded-xl p-2.5 text-xs font-mono font-bold text-gray-950 focus:bg-white focus:border-amber-500 outline-none"
                   />
                   <span className="text-[10px] text-gray-500 mt-0.5 block">
-                    4-digit PIN for partner portal (default: 1234)
+                    4-digit PIN for partner portal (default: 9999)
                   </span>
                 </div>
               </div>
@@ -934,8 +1083,8 @@ export const SyndicateEquityModule: React.FC<SyndicateEquityModuleProps> = ({
               <div className="p-3 bg-amber-50/80 border border-amber-200/80 rounded-2xl flex items-start gap-2.5 text-[11px] text-amber-950">
                 <Smartphone className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
                 <div>
-                  <strong className="block font-bold">Automatic Partner Mobile Credentials:</strong>
-                  <span>When created, this partner signs into the Partner Mobile Portal using their name and PIN ({newPartnerPin || '1234'}). You can click "Login Invite" on their row to copy their personalized WhatsApp invite.</span>
+                  <strong className="block font-bold">Automatic Partner Mobile User Enrollment:</strong>
+                  <span>When added to this project, the partner's mobile number ({newPartnerPhone || 'mobile'}) is automatically registered into the system as their unique Login User ID across this project and firm with default PIN ({newPartnerPin || '9999'}).</span>
                 </div>
               </div>
 

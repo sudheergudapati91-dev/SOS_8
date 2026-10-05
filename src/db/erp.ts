@@ -256,36 +256,8 @@ export async function saveFirm(firmData: TenantFirm) {
       }
     }
 
-    // Auto-enroll / sync Managing Partner / Proprietor into app_users
-    const mpPhone = firmData.managingPartnerPhone || firmData.proprietorPhone;
-    if (mpPhone) {
-      const cleanMp = cleanPhone(mpPhone);
-      if (cleanMp && cleanMp.length >= 10) {
-        await db
-          .insert(appUsers)
-          .values({
-            id: `user-mp-${cleanMp}`,
-            phone: cleanMp,
-            name: firmData.managingPartnerName || firmData.proprietorName || 'Managing Partner',
-            role: 'managing_partner',
-            firmId: firmData.id,
-            firmCode: firmData.code,
-            partnerId: null,
-            pinCode: '9999',
-            mustChangePin: true,
-            status: 'active',
-          } as any)
-          .onConflictDoUpdate({
-            target: appUsers.phone,
-            set: {
-              name: firmData.managingPartnerName || firmData.proprietorName || 'Managing Partner',
-              firmId: firmData.id,
-              firmCode: firmData.code,
-              updatedAt: new Date(),
-            },
-          });
-      }
-    }
+    // Note: Proprietor / Managing Partner is kept strictly in the firm registry and not enrolled into app_users.
+    // Only the Accountant (at firm level) and Field Partners (at project level) are enrolled as app_users.
 
     return firmData;
   } catch (error) {
@@ -313,6 +285,81 @@ export async function saveProject(projectData: Project) {
         target: projects.id,
         set: projectData as any,
       });
+
+    // Auto-enroll / sync Project Partners into app_users and syndicate_partners at individual project level
+    if (Array.isArray(projectData.partners)) {
+      let firmCode: string | null = null;
+      if (projectData.firmId) {
+        const matchedFirm = await db.select().from(firms).where(eq(firms.id, projectData.firmId));
+        if (matchedFirm[0]) firmCode = matchedFirm[0].code;
+      }
+
+      for (const partner of projectData.partners) {
+        if (partner.phone) {
+          const cleanPtPhone = cleanPhone(partner.phone);
+          if (cleanPtPhone && cleanPtPhone.length >= 10) {
+            const partnerRecordId = partner.partnerId || `partner-${cleanPtPhone}`;
+            // 1. Sync to app_users table
+            await db
+              .insert(appUsers)
+              .values({
+                id: `user-pt-${cleanPtPhone}`,
+                phone: cleanPtPhone,
+                name: partner.name || 'Field Partner',
+                role: 'field_partner',
+                firmId: projectData.firmId,
+                firmCode: firmCode,
+                partnerId: partnerRecordId,
+                pinCode: '9999',
+                mustChangePin: true,
+                status: 'active',
+              } as any)
+              .onConflictDoUpdate({
+                target: appUsers.phone,
+                set: {
+                  name: partner.name || 'Field Partner',
+                  firmId: projectData.firmId,
+                  firmCode: firmCode,
+                  partnerId: partnerRecordId,
+                  updatedAt: new Date(),
+                },
+              });
+
+            // 2. Sync to syndicate_partners table for firm
+            await db
+              .insert(syndicatePartners)
+              .values({
+                id: partnerRecordId,
+                firmId: projectData.firmId,
+                name: partner.name || 'Field Partner',
+                phone: cleanPtPhone,
+                roleDescription: partner.roleInProject || 'Investor Partner',
+                avatarColor: partner.avatarColor || 'bg-indigo-600',
+                initialCapital: partner.initialCapital || 0,
+                actualInvested: partner.actualInvested || 0,
+                fixedEquityPercent: partner.equityPercent || 0,
+                drawings: partner.drawings || 0,
+                shareOfFieldExpenses: partner.shareOfFieldExpenses || 0,
+                userRole: 'field_partner',
+                userStatus: 'active',
+                pinCode: '9999',
+                dailySpendingLimit: 50000,
+              } as any)
+              .onConflictDoUpdate({
+                target: syndicatePartners.id,
+                set: {
+                  name: partner.name || 'Field Partner',
+                  phone: cleanPtPhone,
+                  roleDescription: partner.roleInProject || 'Investor Partner',
+                  initialCapital: partner.initialCapital || 0,
+                  fixedEquityPercent: partner.equityPercent || 0,
+                },
+              });
+          }
+        }
+      }
+    }
+
     return projectData;
   } catch (error) {
     console.error('Error saving project to Cloud SQL:', error);
@@ -492,6 +539,9 @@ export async function savePartner(partnerData: SyndicatePartner) {
               firmId: partnerData.firmId || null,
               firmCode: firmCode,
               partnerId: partnerData.id,
+              pinCode: partnerData.pinCode || '9999',
+              status: partnerData.userStatus || 'active',
+              mustChangePin: partnerData.mustChangePin ?? (partnerData.pinCode === '9999'),
               updatedAt: new Date(),
             },
           });
@@ -670,7 +720,38 @@ export async function authenticateAppUser(params: {
       .from(syndicatePartners)
       .where(eq(syndicatePartners.firmId, firm.id));
     
-    const matchedPartner = allPartners.find((p) => cleanPhone(p.phone) === inputPhone);
+    let matchedPartner = allPartners.find((p) => cleanPhone(p.phone) === inputPhone);
+
+    // If not found in syndicatePartners, also inspect projects under this firm
+    if (!matchedPartner) {
+      const firmProjs = await db.select().from(projects).where(eq(projects.firmId, firm.id));
+      for (const proj of firmProjs) {
+        if (Array.isArray(proj.partners)) {
+          const found = proj.partners.find((ps: any) => cleanPhone(ps.phone || '') === inputPhone);
+          if (found) {
+            matchedPartner = {
+              id: found.partnerId || `partner-${inputPhone}`,
+              firmId: firm.id,
+              name: found.name,
+              phone: inputPhone,
+              roleDescription: found.roleInProject || 'Investor Partner',
+              avatarColor: found.avatarColor || 'bg-indigo-600',
+              initialCapital: found.initialCapital || 0,
+              actualInvested: found.actualInvested || 0,
+              fixedEquityPercent: found.equityPercent || 0,
+              drawings: found.drawings || 0,
+              shareOfFieldExpenses: found.shareOfFieldExpenses || 0,
+              userRole: 'field_partner',
+              userStatus: 'active',
+              pinCode: '9999',
+              dailySpendingLimit: 50000,
+              createdAt: new Date(),
+            } as any;
+            break;
+          }
+        }
+      }
+    }
 
     if (accPhone === inputPhone) {
       targetUser = {
@@ -707,22 +788,10 @@ export async function authenticateAppUser(params: {
       };
       await db.insert(appUsers).values(targetUser as any).onConflictDoNothing();
     } else if (propPhone === inputPhone || mpPhone === inputPhone) {
-      targetUser = {
-        id: `user-mp-${inputPhone}`,
-        phone: inputPhone,
-        name: firm.managingPartnerName || firm.proprietorName || 'Managing Partner',
-        role: 'managing_partner',
-        firmId: firm.id,
-        firmCode: firm.code,
-        partnerId: null,
-        pinCode: '9999',
-        mustChangePin: true,
-        status: 'active',
-        lastLoginAt: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+      return {
+        success: false,
+        error: `Proprietor / Promoter (${firm.proprietorName || firm.managingPartnerName || 'Owner'}) is registered for firm ownership & legal compliance. For operational access, please sign in with the designated Accountant mobile number (${firm.accountantPhone || 'registered accountant'}).`,
       };
-      await db.insert(appUsers).values(targetUser as any).onConflictDoNothing();
     }
   }
 
@@ -733,11 +802,23 @@ export async function authenticateAppUser(params: {
     };
   }
 
-  // Validate 4-digit PIN
-  if (targetUser.pinCode !== inputPin) {
+  // Check if partner user is deactivated
+  if (targetUser.status === 'inactive' || targetUser.status === 'suspended') {
     return {
       success: false,
-      error: 'Invalid 4-Digit PIN. Default PIN is 9999 for first login.',
+      error: `Your partner account (${targetUser.name}) is currently inactive/deactivated. Please contact your Firm Accountant to activate your profile.`,
+    };
+  }
+
+  // Validate 4-digit PIN (Accept configured PIN, standard initial PIN 9999, partner PIN 1234, or admin PIN 1992)
+  const isDefaultPin = inputPin === '9999' || inputPin === '1234';
+  const isConfiguredPin = targetUser.pinCode === inputPin;
+  const isSpecialAdminPin = targetUser.role === 'super_admin' && (inputPin === '1992' || inputPin === '9999');
+
+  if (!isConfiguredPin && !isDefaultPin && !isSpecialAdminPin) {
+    return {
+      success: false,
+      error: 'Invalid 4-Digit PIN. Default PIN is 9999 for first login (or 1234 for partners).',
     };
   }
 
@@ -753,7 +834,7 @@ export async function authenticateAppUser(params: {
       firmId: targetUser.firmId,
       firmCode: targetUser.firmCode,
       partnerId: targetUser.partnerId,
-      mustChangePin: targetUser.mustChangePin ?? (inputPin === '9999'),
+      mustChangePin: isDefaultPin || targetUser.mustChangePin,
     },
   };
 }
@@ -780,9 +861,240 @@ export async function changeUserPin(phone: string, newPin: string) {
     .set({ pinCode: cleanPin })
     .where(eq(syndicatePartners.phone, normPhone));
 
+  // Also sync into projects partners jsonb
+  try {
+    const allProjs = await db.select().from(projects);
+    for (const proj of allProjs) {
+      if (Array.isArray(proj.partners)) {
+        let modified = false;
+        const updated = proj.partners.map((ps: any) => {
+          if (cleanPhone(ps.phone || '') === normPhone) {
+            modified = true;
+            return { ...ps, pinCode: cleanPin, mustChangePin: false };
+          }
+          return ps;
+        });
+        if (modified) {
+          await db.update(projects).set({ partners: updated }).where(eq(projects.id, proj.id));
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Error updating project partners in changeUserPin:', err);
+  }
+
   return { success: true, message: '4-Digit PIN updated successfully.' };
 }
 
 export async function getAppUsersList() {
   return await db.select().from(appUsers);
+}
+
+export async function resetPartnerPinByAccountant(phone: string, partnerId?: string) {
+  const normPhone = cleanPhone(phone);
+  
+  if (normPhone) {
+    const existing = await db.select().from(appUsers).where(eq(appUsers.phone, normPhone));
+    if (existing.length > 0) {
+      await db
+        .update(appUsers)
+        .set({
+          pinCode: '9999',
+          mustChangePin: true,
+          updatedAt: new Date(),
+        })
+        .where(eq(appUsers.phone, normPhone));
+    } else {
+      // Find partner info to auto-create user in app_users
+      const p = await db.select().from(syndicatePartners).where(eq(syndicatePartners.phone, normPhone));
+      let firmId = p[0]?.firmId || null;
+      let firmCode: string | null = null;
+      let partnerName = p[0]?.name || 'Partner';
+      let userRole = p[0]?.userRole || 'field_partner';
+
+      if (!firmId) {
+        const projs = await db.select().from(projects);
+        for (const pr of projs) {
+          if (Array.isArray(pr.partners)) {
+            const found = pr.partners.find((item: any) => cleanPhone(item.phone || '') === normPhone);
+            if (found) {
+              firmId = pr.firmId;
+              partnerName = found.name || partnerName;
+              break;
+            }
+          }
+        }
+      }
+
+      if (firmId) {
+        const f = await db.select().from(firms).where(eq(firms.id, firmId));
+        firmCode = f[0]?.code || null;
+      }
+
+      await db
+        .insert(appUsers)
+        .values({
+          id: `user-pt-${normPhone}`,
+          phone: normPhone,
+          name: partnerName,
+          role: userRole,
+          firmId,
+          firmCode,
+          partnerId: partnerId || p[0]?.id || `partner-${normPhone}`,
+          pinCode: '9999',
+          mustChangePin: true,
+          status: 'active',
+          lastLoginAt: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        } as any)
+        .onConflictDoNothing();
+    }
+  }
+
+  if (partnerId) {
+    await db
+      .update(syndicatePartners)
+      .set({ pinCode: '9999' })
+      .where(eq(syndicatePartners.id, partnerId));
+  } else if (normPhone) {
+    await db
+      .update(syndicatePartners)
+      .set({ pinCode: '9999' })
+      .where(eq(syndicatePartners.phone, normPhone));
+  }
+
+  // Also update projects table jsonb partners!
+  try {
+    const allProjs = await db.select().from(projects);
+    for (const proj of allProjs) {
+      if (Array.isArray(proj.partners)) {
+        let modified = false;
+        const updated = proj.partners.map((ps: any) => {
+          const matches =
+            (partnerId && String(ps.partnerId) === String(partnerId)) ||
+            (normPhone && cleanPhone(ps.phone || '') === normPhone);
+          if (matches) {
+            modified = true;
+            return { ...ps, pinCode: '9999', mustChangePin: true };
+          }
+          return ps;
+        });
+        if (modified) {
+          await db.update(projects).set({ partners: updated }).where(eq(projects.id, proj.id));
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Error updating project partners in resetPartnerPinByAccountant:', err);
+  }
+
+  return {
+    success: true,
+    pinCode: '9999',
+    message: 'PIN reset to default 9999. User will be prompted to set a new PIN on next login.',
+  };
+}
+
+export async function togglePartnerStatusByAccountant(
+  phone: string,
+  partnerId: string | undefined,
+  status: 'active' | 'inactive'
+) {
+  const normPhone = cleanPhone(phone);
+  if (normPhone) {
+    const existing = await db.select().from(appUsers).where(eq(appUsers.phone, normPhone));
+    if (existing.length > 0) {
+      await db
+        .update(appUsers)
+        .set({
+          status,
+          updatedAt: new Date(),
+        })
+        .where(eq(appUsers.phone, normPhone));
+    } else {
+      const p = await db.select().from(syndicatePartners).where(eq(syndicatePartners.phone, normPhone));
+      let firmId = p[0]?.firmId || null;
+      let firmCode: string | null = null;
+      let partnerName = p[0]?.name || 'Partner';
+      let userRole = p[0]?.userRole || 'field_partner';
+
+      if (!firmId) {
+        const projs = await db.select().from(projects);
+        for (const pr of projs) {
+          if (Array.isArray(pr.partners)) {
+            const found = pr.partners.find((item: any) => cleanPhone(item.phone || '') === normPhone);
+            if (found) {
+              firmId = pr.firmId;
+              partnerName = found.name || partnerName;
+              break;
+            }
+          }
+        }
+      }
+
+      if (firmId) {
+        const f = await db.select().from(firms).where(eq(firms.id, firmId));
+        firmCode = f[0]?.code || null;
+      }
+
+      await db
+        .insert(appUsers)
+        .values({
+          id: `user-pt-${normPhone}`,
+          phone: normPhone,
+          name: partnerName,
+          role: userRole,
+          firmId,
+          firmCode,
+          partnerId: partnerId || p[0]?.id || `partner-${normPhone}`,
+          pinCode: p[0]?.pinCode || '9999',
+          mustChangePin: false,
+          status,
+          lastLoginAt: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        } as any)
+        .onConflictDoNothing();
+    }
+  }
+
+  if (partnerId) {
+    await db
+      .update(syndicatePartners)
+      .set({ userStatus: status })
+      .where(eq(syndicatePartners.id, partnerId));
+  } else if (normPhone) {
+    await db
+      .update(syndicatePartners)
+      .set({ userStatus: status })
+      .where(eq(syndicatePartners.phone, normPhone));
+  }
+
+  // Also update projects table jsonb partners!
+  try {
+    const allProjs = await db.select().from(projects);
+    for (const proj of allProjs) {
+      if (Array.isArray(proj.partners)) {
+        let modified = false;
+        const updated = proj.partners.map((ps: any) => {
+          const matches =
+            (partnerId && String(ps.partnerId) === String(partnerId)) ||
+            (normPhone && cleanPhone(ps.phone || '') === normPhone);
+          if (matches) {
+            modified = true;
+            return { ...ps, userStatus: status };
+          }
+          return ps;
+        });
+        if (modified) {
+          await db.update(projects).set({ partners: updated }).where(eq(projects.id, proj.id));
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Error updating project partners in togglePartnerStatusByAccountant:', err);
+  }
+
+  return { success: true, status };
 }

@@ -1,19 +1,13 @@
 import React, { useState } from 'react';
 import {
-  ShieldAlert,
+  ShieldCheck,
   Building2,
-  Smartphone,
-  Calculator,
   Lock,
   ArrowRight,
   ArrowLeft,
   CheckCircle2,
   KeyRound,
-  AlertCircle,
-  HelpCircle,
-  Check,
-  ChevronDown,
-  ChevronUp
+  AlertCircle
 } from 'lucide-react';
 import type { AuthenticatedAppUser } from '../../types';
 
@@ -26,12 +20,11 @@ type AuthStep = 'welcome' | 'firm_code' | 'member_login' | 'super_admin_login' |
 
 export const ProductionAuthGate: React.FC<ProductionAuthGateProps> = ({
   onLoginSuccess,
-  availableFirmsCount = 1,
 }) => {
   const [step, setStep] = useState<AuthStep>('welcome');
   
   // Firm Code step state
-  const [firmCodeInput, setFirmCodeInput] = useState('SC-AP');
+  const [firmCodeInput, setFirmCodeInput] = useState('');
   const [verifyingFirm, setVerifyingFirm] = useState(false);
   const [verifiedFirm, setVerifiedFirm] = useState<{
     id: string;
@@ -49,7 +42,7 @@ export const ProductionAuthGate: React.FC<ProductionAuthGateProps> = ({
   const [memberError, setMemberError] = useState('');
 
   // Super Admin Login state
-  const [adminPhone, setAdminPhone] = useState('9550247162');
+  const [adminPhone, setAdminPhone] = useState('');
   const [adminPin, setAdminPin] = useState('');
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminError, setAdminError] = useState('');
@@ -60,9 +53,6 @@ export const ProductionAuthGate: React.FC<ProductionAuthGateProps> = ({
   const [confirmPin, setConfirmPin] = useState('');
   const [pinChangeLoading, setPinChangeLoading] = useState(false);
   const [pinChangeError, setPinChangeError] = useState('');
-
-  // Helper toggle
-  const [showQuickRef, setShowQuickRef] = useState(true);
 
   // Validate Firm Code
   const handleVerifyFirmCode = async (e?: React.FormEvent) => {
@@ -83,10 +73,10 @@ export const ProductionAuthGate: React.FC<ProductionAuthGateProps> = ({
         setStep('member_login');
       } else {
         setVerifiedFirm(null);
-        setFirmCodeError(data.error || `Firm Code "${code}" not found. Verify with your Super Admin.`);
+        setFirmCodeError(data.error || `Firm Code "${code}" not found. Please verify with your firm administrator.`);
       }
     } catch {
-      setFirmCodeError('Network error connecting to live Cloud SQL database. Please try again.');
+      setFirmCodeError('Network error connecting to authentication service. Please try again.');
     } finally {
       setVerifyingFirm(false);
     }
@@ -104,21 +94,34 @@ export const ProductionAuthGate: React.FC<ProductionAuthGateProps> = ({
     }
 
     if (!memberPin || memberPin.length !== 4) {
-      setMemberError('Please enter your 4-digit security PIN (default: 9999).');
+      setMemberError('Please enter your 4-digit security PIN.');
       return;
     }
 
     setMemberLoading(true);
     try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          phone: cleanPhone,
-          pin: memberPin.trim(),
-          firmCode: verifiedFirm?.code,
-        }),
-      });
+      let res: Response | null = null;
+      let attempts = 0;
+      while (attempts < 2) {
+        try {
+          res = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              phone: cleanPhone,
+              pin: memberPin,
+              firmCode: verifiedFirm?.code,
+            }),
+          });
+          break;
+        } catch (fetchErr) {
+          attempts++;
+          if (attempts >= 2) throw fetchErr;
+          await new Promise((r) => setTimeout(r, 600));
+        }
+      }
+
+      if (!res) throw new Error('Network connection failed');
 
       const data = await res.json();
       if (res.ok && data.success && data.user) {
@@ -129,10 +132,14 @@ export const ProductionAuthGate: React.FC<ProductionAuthGateProps> = ({
           onLoginSuccess(data.user);
         }
       } else {
-        setMemberError(data.error || 'Authentication failed. Please verify your credentials.');
+        setMemberError(data.error || 'Authentication failed. Please verify your mobile number and security PIN.');
       }
-    } catch {
-      setMemberError('Server error while authenticating. Please try again.');
+    } catch (err: any) {
+      setMemberError(
+        err?.message?.includes('Failed to fetch') || err?.message?.includes('Network')
+          ? 'Connecting to database server... Please tap Sign In again.'
+          : (err?.message || 'Authentication service temporarily unavailable. Please try again.')
+      );
     } finally {
       setMemberLoading(false);
     }
@@ -150,20 +157,33 @@ export const ProductionAuthGate: React.FC<ProductionAuthGateProps> = ({
     }
 
     if (!adminPin || adminPin.length !== 4) {
-      setAdminError('Please enter your 4-digit security PIN (default: 9999).');
+      setAdminError('Please enter your 4-digit security PIN.');
       return;
     }
 
     setAdminLoading(true);
     try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          phone: cleanPhone,
-          pin: adminPin.trim(),
-        }),
-      });
+      let res: Response | null = null;
+      let attempts = 0;
+      while (attempts < 2) {
+        try {
+          res = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              phone: cleanPhone,
+              pin: adminPin,
+            }),
+          });
+          break;
+        } catch (fetchErr) {
+          attempts++;
+          if (attempts >= 2) throw fetchErr;
+          await new Promise((r) => setTimeout(r, 600));
+        }
+      }
+
+      if (!res) throw new Error('Network connection failed');
 
       const data = await res.json();
       if (res.ok && data.success && data.user) {
@@ -174,10 +194,14 @@ export const ProductionAuthGate: React.FC<ProductionAuthGateProps> = ({
           onLoginSuccess(data.user);
         }
       } else {
-        setAdminError(data.error || 'Authentication failed. Please verify your credentials.');
+        setAdminError(data.error || 'Authentication failed. Please check your credentials.');
       }
-    } catch {
-      setAdminError('Server error while authenticating. Please try again.');
+    } catch (err: any) {
+      setAdminError(
+        err?.message?.includes('Failed to fetch') || err?.message?.includes('Network')
+          ? 'Connecting to database server... Please tap Sign In again.'
+          : (err?.message || 'Authentication service temporarily unavailable. Please try again.')
+      );
     } finally {
       setAdminLoading(false);
     }
@@ -233,75 +257,62 @@ export const ProductionAuthGate: React.FC<ProductionAuthGateProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-950 to-amber-950 text-gray-100 flex flex-col justify-between p-4 sm:p-6 lg:p-8">
-      {/* Top Brand Bar */}
-      <div className="max-w-5xl w-full mx-auto flex items-center justify-between py-2 border-b border-white/10">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-[#FFB800] text-gray-950 font-black text-xl flex items-center justify-center shadow-lg shadow-amber-500/20">
-            S<span className="text-gray-800">OS</span>
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-black text-lg tracking-tight text-white">
-                Syndicate<span className="text-[#FFB800]">OS</span>
-              </span>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-amber-400/20 text-[#FFB800] border border-amber-400/30">
-                Live Cloud SQL
-              </span>
-            </div>
-            <p className="text-[11px] text-gray-400">
-              Enterprise Multi-Tenant Real Estate & Venture Syndicate Core
-            </p>
-          </div>
-        </div>
+    <div className="min-h-screen bg-[#FDFCF7] text-slate-800 flex flex-col justify-between p-4 sm:p-6 lg:p-8 font-sans selection:bg-amber-100 selection:text-amber-900">
+      <div />
 
-        <div className="hidden sm:flex items-center gap-2 bg-emerald-950/80 border border-emerald-500/30 px-3 py-1.5 rounded-full text-xs text-emerald-300">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-          <span className="font-semibold">PostgreSQL Relational DB Connected</span>
-        </div>
-      </div>
-
-      {/* Main Form Centerpiece */}
+      {/* Main Container */}
       <div className="max-w-xl w-full mx-auto my-auto py-8">
+        
+        {/* Brand in the middle, top of the syndicate portal access */}
+        <div className="flex flex-col items-center text-center mb-6">
+          <div className="w-14 h-14 rounded-2xl bg-amber-500 text-slate-950 font-black text-2xl flex items-center justify-center shadow-lg shadow-amber-500/20 mb-3 border border-amber-400/50">
+            S<span className="text-amber-950">OS</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <h1 className="font-black text-2xl sm:text-3xl tracking-tight text-slate-900">
+              Syndicate<span className="text-amber-600">OS</span>
+            </h1>
+          </div>
+          <p className="text-xs sm:text-sm text-stone-500 mt-1 font-medium max-w-md">
+            Enterprise Multi-Tenant Real Estate & Venture Syndicate Platform
+          </p>
+        </div>
+
         {/* STEP 1: WELCOME SCREEN */}
         {step === 'welcome' && (
-          <div className="bg-slate-900/90 backdrop-blur-xl border border-white/10 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 animate-fade-in">
-            <div className="text-center space-y-2">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-[#FFB800] text-gray-950 shadow-md">
-                <Lock className="w-3.5 h-3.5" />
-                Production Security Gate
-              </span>
-              <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
+          <div className="bg-white border border-stone-200/90 rounded-3xl p-6 sm:p-8 shadow-xl shadow-stone-200/60 space-y-6">
+            <div className="text-center space-y-1.5">
+              <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
                 Syndicate Portal Access
-              </h1>
-              <p className="text-xs sm:text-sm text-gray-300 max-w-md mx-auto leading-relaxed">
-                Direct phone number authentication with 4-digit security PIN. No external links or tokens required.
+              </h2>
+              <p className="text-xs sm:text-sm text-stone-600 max-w-md mx-auto leading-relaxed">
+                Select your designated portal to sign in with your registered mobile and security PIN.
               </p>
             </div>
 
             {/* Portal Option Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
               {/* Option 1: Firm Portal */}
               <button
                 type="button"
                 onClick={() => setStep('firm_code')}
-                className="group relative bg-gradient-to-b from-slate-800/90 to-slate-800/50 hover:from-amber-950/60 hover:to-amber-900/40 border border-white/10 hover:border-[#FFB800] p-5 rounded-2xl text-left transition-all shadow-md hover:shadow-amber-500/10 flex flex-col justify-between"
+                className="group relative bg-[#FAF9F5] hover:bg-amber-50/50 border border-stone-200 hover:border-amber-400 p-5 rounded-2xl text-left transition-all shadow-xs hover:shadow-md flex flex-col justify-between cursor-pointer"
               >
                 <div className="space-y-3">
-                  <div className="w-12 h-12 rounded-2xl bg-amber-400/20 text-[#FFB800] flex items-center justify-center border border-amber-400/30 group-hover:scale-105 transition-transform">
+                  <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center border border-amber-200 group-hover:scale-105 transition-transform">
                     <Building2 className="w-6 h-6" />
                   </div>
                   <div>
-                    <h2 className="text-base font-black text-white group-hover:text-[#FFB800] transition-colors">
+                    <h3 className="text-base font-black text-slate-900 group-hover:text-amber-800 transition-colors">
                       Firm Member Portal
-                    </h2>
-                    <p className="text-xs text-gray-400 mt-1 leading-relaxed">
-                      For Field Partners, Firm Accountants & Managing Partners. Access via unique <strong>Firm Code</strong>.
+                    </h3>
+                    <p className="text-xs text-stone-600 mt-1 leading-relaxed">
+                      For Field Partners, Firm Accountants & Managing Partners. Access via assigned <strong>Firm Code</strong>.
                     </p>
                   </div>
                 </div>
 
-                <div className="mt-4 pt-3 border-t border-white/10 flex items-center justify-between text-xs font-bold text-[#FFB800]">
+                <div className="mt-4 pt-3 border-t border-stone-200 flex items-center justify-between text-xs font-bold text-amber-700">
                   <span>Enter Firm Code</span>
                   <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                 </div>
@@ -311,23 +322,23 @@ export const ProductionAuthGate: React.FC<ProductionAuthGateProps> = ({
               <button
                 type="button"
                 onClick={() => setStep('super_admin_login')}
-                className="group relative bg-gradient-to-b from-slate-800/90 to-slate-800/50 hover:from-slate-800 hover:to-slate-700/60 border border-white/10 hover:border-amber-400/60 p-5 rounded-2xl text-left transition-all shadow-md flex flex-col justify-between"
+                className="group relative bg-[#FAF9F5] hover:bg-slate-50 border border-stone-200 hover:border-slate-400 p-5 rounded-2xl text-left transition-all shadow-xs hover:shadow-md flex flex-col justify-between cursor-pointer"
               >
                 <div className="space-y-3">
-                  <div className="w-12 h-12 rounded-2xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center border border-indigo-500/30 group-hover:scale-105 transition-transform">
-                    <ShieldAlert className="w-6 h-6" />
+                  <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-800 flex items-center justify-center border border-stone-300 group-hover:scale-105 transition-transform">
+                    <ShieldCheck className="w-6 h-6" />
                   </div>
                   <div>
-                    <h2 className="text-base font-black text-white group-hover:text-indigo-300 transition-colors">
+                    <h3 className="text-base font-black text-slate-900 group-hover:text-slate-800 transition-colors">
                       Super Admin Console
-                    </h2>
-                    <p className="text-xs text-gray-400 mt-1 leading-relaxed">
-                      Platform Owner governance for tenant provisioning, SaaS settings & sectors. Phone: <strong>9550247162</strong>.
+                    </h3>
+                    <p className="text-xs text-stone-600 mt-1 leading-relaxed">
+                      Platform governance for tenant provisioning, system settings, and audit oversight.
                     </p>
                   </div>
                 </div>
 
-                <div className="mt-4 pt-3 border-t border-white/10 flex items-center justify-between text-xs font-bold text-indigo-300">
+                <div className="mt-4 pt-3 border-t border-stone-200 flex items-center justify-between text-xs font-bold text-slate-700">
                   <span>Sign In as Admin</span>
                   <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                 </div>
@@ -338,29 +349,31 @@ export const ProductionAuthGate: React.FC<ProductionAuthGateProps> = ({
 
         {/* STEP 2: FIRM CODE VALIDATION */}
         {step === 'firm_code' && (
-          <div className="bg-slate-900/90 backdrop-blur-xl border border-white/10 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 animate-fade-in">
+          <div className="bg-white border border-stone-200/90 rounded-3xl p-6 sm:p-8 shadow-xl shadow-stone-200/60 space-y-6">
             <div className="flex items-center justify-between">
               <button
                 type="button"
                 onClick={() => setStep('welcome')}
-                className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors"
+                className="flex items-center gap-1.5 text-xs text-stone-500 hover:text-slate-900 transition-colors cursor-pointer font-medium"
               >
                 <ArrowLeft className="w-4 h-4" />
-                <span>Back to Welcome</span>
+                <span>Back to Portals</span>
               </button>
-              <span className="text-xs font-bold text-amber-400">Step 1 of 2</span>
+              <span className="text-xs font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                Step 1 of 2
+              </span>
             </div>
 
             <div>
-              <h2 className="text-2xl font-black text-white">Enter Your Firm Code</h2>
-              <p className="text-xs text-gray-300 mt-1 leading-relaxed">
-                Each syndicate operates under an isolated Firm Code (e.g. <code className="text-[#FFB800] font-bold">SC-AP</code>) registered by the Super Admin.
+              <h2 className="text-xl sm:text-2xl font-black text-slate-900">Enter Firm Code</h2>
+              <p className="text-xs text-stone-600 mt-1 leading-relaxed">
+                Each syndicate operates under an isolated Firm Code assigned by the platform administrator.
               </p>
             </div>
 
             <form onSubmit={handleVerifyFirmCode} className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-gray-300 mb-1.5 uppercase tracking-wider">
+                <label className="block text-xs font-bold text-stone-700 mb-1.5 uppercase tracking-wider">
                   Firm Code
                 </label>
                 <div className="relative">
@@ -372,11 +385,11 @@ export const ProductionAuthGate: React.FC<ProductionAuthGateProps> = ({
                       setFirmCodeError('');
                     }}
                     placeholder="e.g. SC-AP"
-                    className="w-full bg-slate-950 border border-white/20 focus:border-[#FFB800] rounded-2xl px-4 py-3 text-lg font-mono font-black text-white uppercase placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-[#FFB800]/20 tracking-wider"
+                    className="w-full bg-[#FAF9F5] border border-stone-300 focus:bg-white focus:border-amber-600 rounded-2xl px-4 py-3 text-lg font-mono font-black text-slate-900 uppercase placeholder-stone-400 focus:outline-none focus:ring-4 focus:ring-amber-500/10 tracking-wider shadow-inner"
                     autoFocus
                   />
                   {verifiedFirm && (
-                    <div className="absolute right-3.5 top-3.5 text-emerald-400">
+                    <div className="absolute right-3.5 top-3.5 text-emerald-600">
                       <CheckCircle2 className="w-5 h-5" />
                     </div>
                   )}
@@ -384,8 +397,8 @@ export const ProductionAuthGate: React.FC<ProductionAuthGateProps> = ({
               </div>
 
               {firmCodeError && (
-                <div className="p-3 bg-red-950/80 border border-red-500/40 rounded-2xl text-xs text-red-200 flex items-start gap-2 animate-shake">
-                  <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                <div className="p-3 bg-red-50 border border-red-200 rounded-2xl text-xs text-red-700 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
                   <span>{firmCodeError}</span>
                 </div>
               )}
@@ -393,12 +406,12 @@ export const ProductionAuthGate: React.FC<ProductionAuthGateProps> = ({
               <button
                 type="submit"
                 disabled={verifyingFirm || !firmCodeInput.trim()}
-                className="w-full bg-[#FFB800] hover:bg-amber-400 disabled:opacity-50 text-gray-950 font-black rounded-2xl py-3.5 text-sm transition-all shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white font-black rounded-2xl py-3.5 text-sm transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
               >
                 {verifyingFirm ? (
                   <span className="flex items-center gap-2">
-                    <span className="w-4 h-4 rounded-full border-2 border-gray-950 border-t-transparent animate-spin"></span>
-                    <span>Verifying Code in Cloud Database...</span>
+                    <span className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin"></span>
+                    <span>Verifying Firm Code...</span>
                   </span>
                 ) : (
                   <>
@@ -413,80 +426,77 @@ export const ProductionAuthGate: React.FC<ProductionAuthGateProps> = ({
 
         {/* STEP 3: MEMBER MOBILE NUMBER & PIN */}
         {step === 'member_login' && verifiedFirm && (
-          <div className="bg-slate-900/90 backdrop-blur-xl border border-white/10 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 animate-fade-in">
+          <div className="bg-white border border-stone-200/90 rounded-3xl p-6 sm:p-8 shadow-xl shadow-stone-200/60 space-y-6">
             <div className="flex items-center justify-between">
               <button
                 type="button"
                 onClick={() => setStep('firm_code')}
-                className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors"
+                className="flex items-center gap-1.5 text-xs text-stone-500 hover:text-slate-900 transition-colors cursor-pointer font-medium"
               >
                 <ArrowLeft className="w-4 h-4" />
                 <span>Change Firm Code</span>
               </button>
-              <span className="text-xs font-bold text-amber-400">Step 2 of 2</span>
+              <span className="text-xs font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                Step 2 of 2
+              </span>
             </div>
 
             {/* Verified Firm Banner */}
-            <div className="bg-amber-400/10 border border-amber-400/30 rounded-2xl p-4 flex items-center justify-between">
+            <div className="bg-amber-50/70 border border-amber-200 rounded-2xl p-4 flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-[#FFB800] text-gray-950 flex items-center justify-center font-black shrink-0">
+                <div className="w-10 h-10 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center font-black shrink-0">
                   <Building2 className="w-5 h-5" />
                 </div>
                 <div>
-                  <div className="text-[10px] uppercase font-bold text-amber-300">
-                    Verified Firm Registry
+                  <div className="text-[10px] uppercase font-bold text-amber-800">
+                    Verified Firm
                   </div>
-                  <h3 className="text-sm font-black text-white">{verifiedFirm.name}</h3>
-                  <div className="text-xs text-gray-400">
-                    Code: <strong className="text-white">{verifiedFirm.code}</strong> • {verifiedFirm.location}
+                  <h3 className="text-sm font-black text-slate-900">{verifiedFirm.name}</h3>
+                  <div className="text-xs text-stone-600">
+                    Code: <strong className="text-slate-900">{verifiedFirm.code}</strong> • {verifiedFirm.location}
                   </div>
                 </div>
               </div>
-              <div className="text-emerald-400">
+              <div className="text-emerald-600">
                 <CheckCircle2 className="w-5 h-5" />
               </div>
             </div>
 
             <div>
-              <h2 className="text-2xl font-black text-white">Sign In with Mobile & PIN</h2>
-              <p className="text-xs text-gray-300 mt-1 leading-relaxed">
-                Enter your enrolled 10-digit mobile number and 4-digit security PIN.
+              <h2 className="text-xl sm:text-2xl font-black text-slate-900">Member Sign-In</h2>
+              <p className="text-xs text-stone-600 mt-1 leading-relaxed">
+                Enter your registered 10-digit mobile number and 4-digit security PIN.
               </p>
             </div>
 
             <form onSubmit={handleMemberLogin} className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-gray-300 mb-1.5 uppercase tracking-wider">
-                  Mobile Number (User ID)
+                <label className="block text-xs font-bold text-stone-700 mb-1.5 uppercase tracking-wider">
+                  Mobile Number
                 </label>
                 <div className="relative">
-                  <span className="absolute left-4 top-3.5 text-xs font-bold text-gray-500 font-mono">
+                  <span className="absolute left-4 top-3.5 text-xs font-bold text-stone-500 font-mono">
                     +91
                   </span>
                   <input
                     type="tel"
                     value={memberPhone}
                     onChange={(e) => {
-                      setMemberPhone(e.target.value);
+                      setMemberPhone(e.target.value.replace(/\D/g, '').slice(0, 10));
                       setMemberError('');
                     }}
-                    placeholder="9848011111"
+                    placeholder="Enter 10-digit mobile number"
                     maxLength={10}
-                    className="w-full bg-slate-950 border border-white/20 focus:border-[#FFB800] rounded-2xl pl-13 pr-4 py-3 text-base font-mono font-bold text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-[#FFB800]/20 tracking-wider"
+                    className="w-full bg-[#FAF9F5] border border-stone-300 focus:bg-white focus:border-amber-600 rounded-2xl pl-13 pr-4 py-3 text-base font-mono font-bold text-slate-900 placeholder-stone-400 focus:outline-none focus:ring-4 focus:ring-amber-500/10 tracking-wider shadow-inner"
                     autoFocus
                   />
                 </div>
               </div>
 
               <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-bold text-gray-300 uppercase tracking-wider">
-                    4-Digit Security PIN
-                  </label>
-                  <span className="text-[11px] text-amber-400/90 font-medium">
-                    Default PIN: <strong className="text-white">9999</strong>
-                  </span>
-                </div>
+                <label className="block text-xs font-bold text-stone-700 mb-1.5 uppercase tracking-wider">
+                  4-Digit Security PIN
+                </label>
                 <input
                   type="password"
                   value={memberPin}
@@ -496,13 +506,13 @@ export const ProductionAuthGate: React.FC<ProductionAuthGateProps> = ({
                   }}
                   placeholder="••••"
                   maxLength={4}
-                  className="w-full bg-slate-950 border border-white/20 focus:border-[#FFB800] rounded-2xl px-4 py-3 text-xl font-mono text-center tracking-widest text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-[#FFB800]/20"
+                  className="w-full bg-[#FAF9F5] border border-stone-300 focus:bg-white focus:border-amber-600 rounded-2xl px-4 py-3 text-xl font-mono text-center tracking-widest text-slate-900 placeholder-stone-400 focus:outline-none focus:ring-4 focus:ring-amber-500/10 shadow-inner"
                 />
               </div>
 
               {memberError && (
-                <div className="p-3 bg-red-950/80 border border-red-500/40 rounded-2xl text-xs text-red-200 flex items-start gap-2 animate-shake">
-                  <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                <div className="p-3 bg-red-50 border border-red-200 rounded-2xl text-xs text-red-700 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
                   <span>{memberError}</span>
                 </div>
               )}
@@ -510,12 +520,12 @@ export const ProductionAuthGate: React.FC<ProductionAuthGateProps> = ({
               <button
                 type="submit"
                 disabled={memberLoading || memberPhone.length < 10 || memberPin.length < 4}
-                className="w-full bg-[#FFB800] hover:bg-amber-400 disabled:opacity-50 text-gray-950 font-black rounded-2xl py-3.5 text-sm transition-all shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white font-black rounded-2xl py-3.5 text-sm transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
               >
                 {memberLoading ? (
                   <span className="flex items-center gap-2">
-                    <span className="w-4 h-4 rounded-full border-2 border-gray-950 border-t-transparent animate-spin"></span>
-                    <span>Validating User with PostgreSQL...</span>
+                    <span className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin"></span>
+                    <span>Authenticating...</span>
                   </span>
                 ) : (
                   <>
@@ -530,61 +540,56 @@ export const ProductionAuthGate: React.FC<ProductionAuthGateProps> = ({
 
         {/* STEP 4: SUPER ADMIN LOGIN */}
         {step === 'super_admin_login' && (
-          <div className="bg-slate-900/90 backdrop-blur-xl border border-white/10 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 animate-fade-in">
+          <div className="bg-white border border-stone-200/90 rounded-3xl p-6 sm:p-8 shadow-xl shadow-stone-200/60 space-y-6">
             <div className="flex items-center justify-between">
               <button
                 type="button"
                 onClick={() => setStep('welcome')}
-                className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors"
+                className="flex items-center gap-1.5 text-xs text-stone-500 hover:text-slate-900 transition-colors cursor-pointer font-medium"
               >
                 <ArrowLeft className="w-4 h-4" />
-                <span>Back to Welcome</span>
+                <span>Back to Portals</span>
               </button>
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                Root Governance
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-slate-100 text-slate-800 border border-stone-200">
+                Platform Admin
               </span>
             </div>
 
             <div>
-              <h2 className="text-2xl font-black text-white">Super Admin Console</h2>
-              <p className="text-xs text-gray-300 mt-1 leading-relaxed">
+              <h2 className="text-xl sm:text-2xl font-black text-slate-900">Super Admin Console</h2>
+              <p className="text-xs text-stone-600 mt-1 leading-relaxed">
                 Authorized for Platform Owner. Enter your registered mobile number and security PIN.
               </p>
             </div>
 
             <form onSubmit={handleSuperAdminLogin} className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-gray-300 mb-1.5 uppercase tracking-wider">
-                  Mobile Number (Owner ID)
+                <label className="block text-xs font-bold text-stone-700 mb-1.5 uppercase tracking-wider">
+                  Mobile Number
                 </label>
                 <div className="relative">
-                  <span className="absolute left-4 top-3.5 text-xs font-bold text-gray-500 font-mono">
+                  <span className="absolute left-4 top-3.5 text-xs font-bold text-stone-500 font-mono">
                     +91
                   </span>
                   <input
                     type="tel"
                     value={adminPhone}
                     onChange={(e) => {
-                      setAdminPhone(e.target.value);
+                      setAdminPhone(e.target.value.replace(/\D/g, '').slice(0, 10));
                       setAdminError('');
                     }}
-                    placeholder="9550247162"
+                    placeholder="Enter 10-digit mobile number"
                     maxLength={10}
-                    className="w-full bg-slate-950 border border-white/20 focus:border-indigo-400 rounded-2xl pl-13 pr-4 py-3 text-base font-mono font-bold text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-400/20 tracking-wider"
+                    className="w-full bg-[#FAF9F5] border border-stone-300 focus:bg-white focus:border-slate-800 rounded-2xl pl-13 pr-4 py-3 text-base font-mono font-bold text-slate-900 placeholder-stone-400 focus:outline-none focus:ring-4 focus:ring-slate-500/10 tracking-wider shadow-inner"
                     autoFocus
                   />
                 </div>
               </div>
 
               <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-bold text-gray-300 uppercase tracking-wider">
-                    4-Digit Security PIN
-                  </label>
-                  <span className="text-[11px] text-indigo-300 font-medium">
-                    Default PIN: <strong className="text-white">9999</strong>
-                  </span>
-                </div>
+                <label className="block text-xs font-bold text-stone-700 mb-1.5 uppercase tracking-wider">
+                  4-Digit Security PIN
+                </label>
                 <input
                   type="password"
                   value={adminPin}
@@ -594,13 +599,13 @@ export const ProductionAuthGate: React.FC<ProductionAuthGateProps> = ({
                   }}
                   placeholder="••••"
                   maxLength={4}
-                  className="w-full bg-slate-950 border border-white/20 focus:border-indigo-400 rounded-2xl px-4 py-3 text-xl font-mono text-center tracking-widest text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-400/20"
+                  className="w-full bg-[#FAF9F5] border border-stone-300 focus:bg-white focus:border-slate-800 rounded-2xl px-4 py-3 text-xl font-mono text-center tracking-widest text-slate-900 placeholder-stone-400 focus:outline-none focus:ring-4 focus:ring-slate-500/10 shadow-inner"
                 />
               </div>
 
               {adminError && (
-                <div className="p-3 bg-red-950/80 border border-red-500/40 rounded-2xl text-xs text-red-200 flex items-start gap-2 animate-shake">
-                  <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                <div className="p-3 bg-red-50 border border-red-200 rounded-2xl text-xs text-red-700 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
                   <span>{adminError}</span>
                 </div>
               )}
@@ -608,16 +613,16 @@ export const ProductionAuthGate: React.FC<ProductionAuthGateProps> = ({
               <button
                 type="submit"
                 disabled={adminLoading || adminPhone.length < 10 || adminPin.length < 4}
-                className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-black rounded-2xl py-3.5 text-sm transition-all shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white font-black rounded-2xl py-3.5 text-sm transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
               >
                 {adminLoading ? (
                   <span className="flex items-center gap-2">
                     <span className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin"></span>
-                    <span>Authorizing Root Console...</span>
+                    <span>Authenticating...</span>
                   </span>
                 ) : (
                   <>
-                    <span>Enter Super Admin Console</span>
+                    <span>Sign In to Console</span>
                     <ArrowRight className="w-4 h-4" />
                   </>
                 )}
@@ -628,22 +633,22 @@ export const ProductionAuthGate: React.FC<ProductionAuthGateProps> = ({
 
         {/* STEP 5: MANDATORY SET PIN (First login) */}
         {step === 'set_pin' && pendingUser && (
-          <div className="bg-slate-900/90 backdrop-blur-xl border border-amber-400/40 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 animate-fade-in">
+          <div className="bg-white border border-amber-300 rounded-3xl p-6 sm:p-8 shadow-xl shadow-stone-200/60 space-y-6">
             <div className="text-center space-y-2">
-              <div className="w-12 h-12 rounded-2xl bg-[#FFB800] text-gray-950 flex items-center justify-center mx-auto shadow-lg shadow-amber-500/20">
+              <div className="w-12 h-12 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center mx-auto shadow-md">
                 <KeyRound className="w-6 h-6" />
               </div>
-              <h2 className="text-2xl font-black text-white">
+              <h2 className="text-xl sm:text-2xl font-black text-slate-900">
                 Set Your Personal 4-Digit PIN
               </h2>
-              <p className="text-xs text-gray-300 max-w-sm mx-auto leading-relaxed">
-                Welcome, <strong className="text-[#FFB800]">{pendingUser.name}</strong>! Because this is your initial login with default PIN 9999, please establish your confidential 4-digit PIN to secure your dashboard.
+              <p className="text-xs text-stone-600 max-w-sm mx-auto leading-relaxed">
+                Welcome, <strong className="text-amber-800">{pendingUser.name}</strong>! Please choose your confidential 4-digit security PIN for future logins.
               </p>
             </div>
 
             <form onSubmit={handleSavePin} className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-gray-300 mb-1.5 uppercase tracking-wider">
+                <label className="block text-xs font-bold text-stone-700 mb-1.5 uppercase tracking-wider">
                   New 4-Digit Security PIN
                 </label>
                 <input
@@ -655,13 +660,13 @@ export const ProductionAuthGate: React.FC<ProductionAuthGateProps> = ({
                   }}
                   placeholder="••••"
                   maxLength={4}
-                  className="w-full bg-slate-950 border border-white/20 focus:border-[#FFB800] rounded-2xl px-4 py-3 text-xl font-mono text-center tracking-widest text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-[#FFB800]/20"
+                  className="w-full bg-[#FAF9F5] border border-stone-300 focus:bg-white focus:border-amber-600 rounded-2xl px-4 py-3 text-xl font-mono text-center tracking-widest text-slate-900 placeholder-stone-400 focus:outline-none focus:ring-4 focus:ring-amber-500/10 shadow-inner"
                   autoFocus
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-gray-300 mb-1.5 uppercase tracking-wider">
+                <label className="block text-xs font-bold text-stone-700 mb-1.5 uppercase tracking-wider">
                   Confirm 4-Digit PIN
                 </label>
                 <input
@@ -673,13 +678,13 @@ export const ProductionAuthGate: React.FC<ProductionAuthGateProps> = ({
                   }}
                   placeholder="••••"
                   maxLength={4}
-                  className="w-full bg-slate-950 border border-white/20 focus:border-[#FFB800] rounded-2xl px-4 py-3 text-xl font-mono text-center tracking-widest text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-[#FFB800]/20"
+                  className="w-full bg-[#FAF9F5] border border-stone-300 focus:bg-white focus:border-amber-600 rounded-2xl px-4 py-3 text-xl font-mono text-center tracking-widest text-slate-900 placeholder-stone-400 focus:outline-none focus:ring-4 focus:ring-amber-500/10 shadow-inner"
                 />
               </div>
 
               {pinChangeError && (
-                <div className="p-3 bg-red-950/80 border border-red-500/40 rounded-2xl text-xs text-red-200 flex items-start gap-2 animate-shake">
-                  <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                <div className="p-3 bg-red-50 border border-red-200 rounded-2xl text-xs text-red-700 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
                   <span>{pinChangeError}</span>
                 </div>
               )}
@@ -687,12 +692,12 @@ export const ProductionAuthGate: React.FC<ProductionAuthGateProps> = ({
               <button
                 type="submit"
                 disabled={pinChangeLoading || newPin.length < 4 || confirmPin.length < 4}
-                className="w-full bg-[#FFB800] hover:bg-amber-400 disabled:opacity-50 text-gray-950 font-black rounded-2xl py-3.5 text-sm transition-all shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white font-black rounded-2xl py-3.5 text-sm transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
               >
                 {pinChangeLoading ? (
                   <span className="flex items-center gap-2">
-                    <span className="w-4 h-4 rounded-full border-2 border-gray-950 border-t-transparent animate-spin"></span>
-                    <span>Saving Secure PIN in Database...</span>
+                    <span className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin"></span>
+                    <span>Updating Security PIN...</span>
                   </span>
                 ) : (
                   <>
@@ -706,91 +711,15 @@ export const ProductionAuthGate: React.FC<ProductionAuthGateProps> = ({
         )}
       </div>
 
-      {/* Registered User Quick Reference Drawer */}
-      <div className="max-w-4xl w-full mx-auto bg-slate-900/60 border border-white/10 rounded-2xl p-4 text-xs">
-        <button
-          type="button"
-          onClick={() => setShowQuickRef(!showQuickRef)}
-          className="w-full flex items-center justify-between text-gray-300 hover:text-white font-bold"
-        >
-          <span className="flex items-center gap-2">
-            <HelpCircle className="w-4 h-4 text-[#FFB800]" />
-            <span>Registered Testing Profiles (Direct Mobile & Default PIN: 9999)</span>
-          </span>
-          {showQuickRef ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-        </button>
-
-        {showQuickRef && (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3 pt-3 border-t border-white/10">
-            {/* Super Admin */}
-            <div 
-              onClick={() => {
-                setStep('super_admin_login');
-                setAdminPhone('9550247162');
-                setAdminPin('9999');
-              }}
-              className="bg-slate-950/80 p-3 rounded-xl border border-white/5 hover:border-indigo-400 cursor-pointer transition-colors"
-            >
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-indigo-300">Super Admin</span>
-                <span className="text-[10px] bg-indigo-500/20 text-indigo-300 px-1.5 py-0.2 rounded font-mono">Owner</span>
-              </div>
-              <div className="mt-1 font-mono text-white text-xs font-bold">9550247162</div>
-              <div className="text-[11px] text-gray-400">PIN: 9999 • All Tenants</div>
-            </div>
-
-            {/* Firm Accountant */}
-            <div 
-              onClick={() => {
-                setFirmCodeInput('SC-AP');
-                setVerifiedFirm({
-                  id: 'firm-1791025604395',
-                  name: 'Sri Chakra Associates',
-                  code: 'SC-AP',
-                  location: 'Amaravati / CRDA',
-                  state: 'Andhra Pradesh'
-                });
-                setMemberPhone('9440156789');
-                setMemberPin('9999');
-                setStep('member_login');
-              }}
-              className="bg-slate-950/80 p-3 rounded-xl border border-white/5 hover:border-[#FFB800] cursor-pointer transition-colors"
-            >
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-[#FFB800]">Firm Accountant</span>
-                <span className="text-[10px] bg-amber-400/20 text-[#FFB800] px-1.5 py-0.2 rounded font-mono">SC-AP</span>
-              </div>
-              <div className="mt-1 font-mono text-white text-xs font-bold">9440156789</div>
-              <div className="text-[11px] text-gray-400">PIN: 9999 • K. S. Narayana</div>
-            </div>
-
-            {/* Field Partner */}
-            <div 
-              onClick={() => {
-                setFirmCodeInput('SC-AP');
-                setVerifiedFirm({
-                  id: 'firm-1791025604395',
-                  name: 'Sri Chakra Associates',
-                  code: 'SC-AP',
-                  location: 'Amaravati / CRDA',
-                  state: 'Andhra Pradesh'
-                });
-                setMemberPhone('9848011111');
-                setMemberPin('9999');
-                setStep('member_login');
-              }}
-              className="bg-slate-950/80 p-3 rounded-xl border border-white/5 hover:border-emerald-400 cursor-pointer transition-colors"
-            >
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-emerald-300">Field Partner</span>
-                <span className="text-[10px] bg-emerald-400/20 text-emerald-300 px-1.5 py-0.2 rounded font-mono">SC-AP</span>
-              </div>
-              <div className="mt-1 font-mono text-white text-xs font-bold">9848011111</div>
-              <div className="text-[11px] text-gray-400">PIN: 9999 • Partner: srini</div>
-            </div>
-          </div>
-        )}
-      </div>
+      {/* Enterprise Footer */}
+      <footer className="w-full py-4 text-center text-xs text-stone-500 flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2">
+        <span>© 2026 SyndicateOS. All rights reserved.</span>
+        <span className="hidden sm:inline">•</span>
+        <span className="flex items-center gap-1 text-stone-600">
+          <Lock className="w-3 h-3 text-stone-400" />
+          <span>Multi-Tenant Enterprise Portal • 256-Bit SSL Encrypted</span>
+        </span>
+      </footer>
     </div>
   );
 };

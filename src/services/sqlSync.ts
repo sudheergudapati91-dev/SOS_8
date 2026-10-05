@@ -152,6 +152,41 @@ export async function savePartnerToSql(partner: SyndicatePartner): Promise<void>
   }
 }
 
+export async function resetPartnerPinInSql(
+  phone: string,
+  partnerId?: string
+): Promise<{ success: boolean; message?: string }> {
+  try {
+    const res = await fetch('/api/erp/partners/reset-pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone, partnerId }),
+    });
+    return await res.json();
+  } catch (err) {
+    console.error('Failed to reset partner PIN in Cloud SQL:', err);
+    return { success: false };
+  }
+}
+
+export async function togglePartnerStatusInSql(
+  phone: string,
+  partnerId: string | undefined,
+  status: 'active' | 'inactive'
+): Promise<{ success: boolean; status?: string }> {
+  try {
+    const res = await fetch('/api/erp/partners/toggle-status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone, partnerId, status }),
+    });
+    return await res.json();
+  } catch (err) {
+    console.error('Failed to toggle partner status in Cloud SQL:', err);
+    return { success: false };
+  }
+}
+
 export async function saveIndividualInvestmentToSql(investment: IndividualInvestmentRecord): Promise<void> {
   try {
     await fetch('/api/erp/individual-investments', {

@@ -63,6 +63,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
   
   // Onboarding Form States
   const [newFirmName, setNewFirmName] = useState('');
+  const [newFirmCode, setNewFirmCode] = useState('');
   const [newTradeName, setNewTradeName] = useState('');
   const [newBusinessType, setNewBusinessType] = useState<NonNullable<TenantFirm['businessType']>>('LLP');
   const [newProprietorName, setNewProprietorName] = useState('');
@@ -85,43 +86,29 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
   const [accountantPhone, setAccountantPhone] = useState('');
   const [generatedCredentials, setGeneratedCredentials] = useState<{
     firmId: string;
-    partnerLogin: string;
-    partnerPass: string;
-    accountantLogin: string;
-    accountantPass: string;
     firmCode: string;
     firmName: string;
     proprietor: string;
+    proprietorPhone: string;
+    accountant: string;
+    accountantPhone: string;
+    sectors: SectorType[];
     gstin?: string;
     pan?: string;
   } | null>(null);
-  const [linksModalFirm, setLinksModalFirm] = useState<TenantFirm | null>(null);
-  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
-  const [urlMode, setUrlMode] = useState<'dev' | 'public'>('public');
-
-  const getBaseUrl = () => {
-    if (typeof window !== 'undefined') {
-      let origin = window.location.origin;
-      if (urlMode === 'public' && origin.includes('ais-dev-')) {
-        origin = origin.replace('ais-dev-', 'ais-pre-');
-      }
-      return `${origin}${window.location.pathname}`;
-    }
-    return '';
-  };
-
-  const copyLinkToClipboard = (text: string, key: string) => {
-    if (navigator?.clipboard?.writeText) {
-      navigator.clipboard.writeText(text);
-      setCopiedKey(key);
-      setTimeout(() => setCopiedKey(null), 2500);
-    }
+  // Helper to suggest unique firm code from name & state
+  const generateSuggestedCode = (name: string, state: string) => {
+    const words = name.trim().split(/\s+/).filter(Boolean);
+    if (words.length === 0) return '';
+    const initials = words.map(w => w[0]).join('').toUpperCase().slice(0, 4);
+    return initials + (state === 'Andhra Pradesh' ? '-AP' : '-TG');
   };
 
   // Edit Existing Firm State
   const [editingFirm, setEditingFirm] = useState<TenantFirm | null>(null);
   const [editFirmName, setEditFirmName] = useState('');
+  const [editFirmCode, setEditFirmCode] = useState('');
   const [editTradeName, setEditTradeName] = useState('');
   const [editBusinessType, setEditBusinessType] = useState<NonNullable<TenantFirm['businessType']>>('LLP');
   const [editProprietorName, setEditProprietorName] = useState('');
@@ -173,21 +160,15 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
     e.preventDefault();
     if (!newFirmName.trim()) return;
 
-    const firmCode = newFirmName
-      .split(' ')
-      .map((w) => w[0])
-      .join('')
+    const firmCode = (newFirmCode.trim() || generateSuggestedCode(newFirmName, newState) || 'FIRM-01')
       .toUpperCase()
-      .slice(0, 4) + (newState === 'Andhra Pradesh' ? '-AP' : '-TG');
+      .replace(/[^A-Z0-9-]/g, '');
 
     const mrr = newPlan === 'monthly' ? 2999 : newPlan === 'annual' ? 9999 : 24999;
     const finalProprietor = newProprietorName.trim() || managingPartnerName.trim() || 'Proprietor';
     const finalProprietorPhone = newProprietorPhone.trim() || managingPartnerPhone.trim() || '+91 98480 00000';
-
-    const partnerLogin = `${firmCode.toLowerCase()}.partner@syndicateos.in`;
-    const partnerPass = `Syn!${Math.floor(100000 + Math.random() * 900000)}#`;
-    const accountantLogin = `${firmCode.toLowerCase()}.accounts@syndicateos.in`;
-    const accountantPass = `Acc!${Math.floor(100000 + Math.random() * 900000)}#`;
+    const finalAccountantName = accountantName.trim() || 'Primary Accountant';
+    const finalAccountantPhone = accountantPhone.trim() || '+91 94401 56789';
 
     const newFirm: TenantFirm = {
       id: `firm-${Date.now()}`,
@@ -214,8 +195,8 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
       contactEmail: newContactEmail.trim() || undefined,
       reraNumber: newReraNumber.trim().toUpperCase() || undefined,
       // Accountant & Operations
-      accountantName: accountantName.trim() || 'Primary Accountant',
-      accountantPhone: accountantPhone.trim() || '+91 94400 00000',
+      accountantName: finalAccountantName,
+      accountantPhone: finalAccountantPhone,
       featureFlags: {
         enablePlotGrid: selectedSectors.includes('real_estate_open_plotting'),
         enableApartmentMatrix: selectedSectors.includes('real_estate_construction'),
@@ -224,25 +205,19 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
         enableVoiceNotes: true,
         enableAuditLock: false,
       },
-      credentials: {
-        accountantLogin,
-        accountantPassword: accountantPass,
-        partnerLogin,
-        partnerPassword: partnerPass,
-      },
     };
 
     onAddFirm(newFirm);
 
     setGeneratedCredentials({
       firmId: newFirm.id,
-      partnerLogin,
-      partnerPass,
-      accountantLogin,
-      accountantPass,
       firmCode: newFirm.code,
       firmName: newFirm.name,
       proprietor: finalProprietor,
+      proprietorPhone: finalProprietorPhone,
+      accountant: finalAccountantName,
+      accountantPhone: finalAccountantPhone,
+      sectors: selectedSectors,
       gstin: newFirm.gstin,
       pan: newFirm.panNumber,
     });
@@ -252,6 +227,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
     setShowOnboardingModal(false);
     setGeneratedCredentials(null);
     setNewFirmName('');
+    setNewFirmCode('');
     setNewTradeName('');
     setNewBusinessType('LLP');
     setNewProprietorName('');
@@ -271,6 +247,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
   const handleOpenEditModal = (firm: TenantFirm) => {
     setEditingFirm(firm);
     setEditFirmName(firm.name);
+    setEditFirmCode(firm.code);
     setEditTradeName(firm.tradeName || firm.name);
     setEditBusinessType(firm.businessType || 'LLP');
     const propName = firm.proprietorName || firm.managingPartnerName || '';
@@ -316,6 +293,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
     const updated: TenantFirm = {
       ...editingFirm,
       name: editFirmName.trim(),
+      code: editFirmCode.trim().toUpperCase() || editingFirm.code,
       tradeName: editTradeName.trim(),
       businessType: editBusinessType,
       proprietorName: finalPropName,
@@ -772,17 +750,6 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
                           <Edit3 className="w-3.5 h-3.5 text-amber-700" />
                           <span>Edit</span>
                         </button>
-
-                        {/* 4. Tester Links: Direct deep links for testers */}
-                        <button
-                          id={`btn-share-links-${firm.id}`}
-                          onClick={() => setLinksModalFirm(firm)}
-                          title="Get direct tester links for Firm Accountant and Partner"
-                          className="px-3 py-1.5 rounded-full text-xs font-bold border border-purple-300 bg-purple-50 hover:bg-purple-100 text-purple-900 transition-all flex items-center gap-1.5 shadow-xs"
-                        >
-                          <ExternalLink className="w-3.5 h-3.5 text-purple-700" />
-                          <span>Tester Links</span>
-                        </button>
                       </div>
                     </td>
                   </tr>
@@ -826,7 +793,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="sm:col-span-2">
+                    <div>
                       <label className="block text-gray-700 font-bold mb-1">
                         Firm Legal Name <span className="text-rose-500">*</span>
                       </label>
@@ -834,10 +801,33 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
                         type="text"
                         required
                         value={newFirmName}
-                        onChange={(e) => setNewFirmName(e.target.value)}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setNewFirmName(val);
+                          if (!newFirmCode || newFirmCode === generateSuggestedCode(newFirmName, newState)) {
+                            setNewFirmCode(generateSuggestedCode(val, newState));
+                          }
+                        }}
                         className="w-full bg-white border border-gray-300 rounded-xl p-2.5 text-xs text-gray-950 font-bold focus:ring-2 focus:ring-[#FFB800] outline-none"
                         placeholder="e.g. Sri Lakshmi Balaji Ventures LLP"
                       />
+                    </div>
+
+                    <div>
+                      <label className="block text-gray-700 font-bold mb-1">
+                        Firm Code (Unique Tenant Identifier) <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={newFirmCode}
+                        onChange={(e) => setNewFirmCode(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, ''))}
+                        className="w-full bg-white border border-gray-300 rounded-xl p-2.5 text-xs text-gray-950 font-mono font-black uppercase tracking-wider focus:ring-2 focus:ring-[#FFB800] outline-none"
+                        placeholder="e.g. SC-AP"
+                      />
+                      <span className="text-[10px] text-gray-500 mt-0.5 block font-mono">
+                        Unique ID for firm logins & data isolation in database.
+                      </span>
                     </div>
 
                     <div>
@@ -1157,15 +1147,15 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
                 <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-emerald-900">
                   <div className="flex items-center gap-2 font-black text-sm">
                     <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-                    <span>Firm Tenant Successfully Provisioned!</span>
+                    <span>Firm Tenant Successfully Created in Database!</span>
                   </div>
                   <p className="mt-1 text-[11px] text-emerald-800">
-                    Statutory tax schema initialized with AES-256 GCM encryption.
+                    Firm registry, partition schema, and accountant credentials have been recorded in the database.
                   </p>
                   <div className="mt-2 pt-2 border-t border-emerald-200/60 flex flex-wrap gap-3 font-mono text-[11px]">
-                    <span>Firm: <strong>{generatedCredentials.firmName}</strong> ({generatedCredentials.firmCode})</span>
+                    <span>Firm Name: <strong>{generatedCredentials.firmName}</strong></span>
                     <span>•</span>
-                    <span>Proprietor: <strong>{generatedCredentials.proprietor}</strong></span>
+                    <span>Firm Code: <strong>{generatedCredentials.firmCode}</strong></span>
                     {generatedCredentials.gstin && (
                       <>
                         <span>•</span>
@@ -1176,153 +1166,49 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
                 </div>
 
                 <div className="bg-gray-50 p-4 rounded-2xl border border-gray-200 space-y-3 font-mono">
-                  <div>
-                    <span className="text-gray-500 block text-[10px] uppercase font-bold">Managing Partner / Proprietor Login:</span>
-                    <strong className="text-gray-950 text-sm">{generatedCredentials.partnerLogin}</strong>
-                    <span className="text-gray-600 block text-[11px] mt-0.5">Password: {generatedCredentials.partnerPass}</span>
-                  </div>
-                  <div className="pt-2 border-t border-gray-200">
-                    <span className="text-gray-500 block text-[10px] uppercase font-bold">Primary Accountant Login:</span>
-                    <strong className="text-gray-950 text-sm">{generatedCredentials.accountantLogin}</strong>
-                    <span className="text-gray-600 block text-[11px] mt-0.5">Password: {generatedCredentials.accountantPass}</span>
-                  </div>
-                </div>
-
-                {/* Individual Direct Links for Testers */}
-                <div className="bg-amber-50/70 p-4 rounded-2xl border border-amber-200 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-gray-950 text-xs flex items-center gap-1.5">
-                      <ExternalLink className="w-3.5 h-3.5 text-amber-700" />
-                      <span>Dedicated Links for Your 2 Testers:</span>
-                    </span>
-                    <span className="text-[10px] font-bold text-amber-900 bg-amber-200/70 px-2 py-0.5 rounded-full">
-                      Client-Isolated Mode
-                    </span>
-                  </div>
-
-                  {/* Link 1: Firm Accountant Tester */}
-                  <div className="space-y-1">
-                    <span className="text-[11px] font-bold text-gray-700 block">
-                      👔 Tester 1: Firm Accountant Link
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        readOnly
-                        value={`${getBaseUrl()}?role=accountant&firmId=${generatedCredentials.firmId}&standalone=true`}
-                        className="flex-1 bg-white border border-gray-300 rounded-xl px-2.5 py-1 text-[11px] font-mono text-gray-800 select-all"
-                      />
-                      <button
-                        type="button"
-                        onClick={() =>
-                          copyLinkToClipboard(
-                            `${getBaseUrl()}?role=accountant&firmId=${generatedCredentials.firmId}&standalone=true`,
-                            'new_accountant_link'
-                          )
-                        }
-                        className="flex items-center gap-1 px-3 py-1 bg-[#FFB800] hover:bg-amber-400 text-gray-950 font-bold rounded-xl text-xs shrink-0 shadow-xs cursor-pointer"
-                      >
-                        {copiedKey === 'new_accountant_link' ? (
-                          <>
-                            <Check className="w-3.5 h-3.5 text-emerald-800" />
-                            <span>Copied</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="w-3.5 h-3.5" />
-                            <span>Copy Link</span>
-                          </>
-                        )}
-                      </button>
-                      <a
-                        href={`${getBaseUrl()}?role=accountant&firmId=${generatedCredentials.firmId}&standalone=true`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 px-3 py-1 bg-gray-900 hover:bg-black text-amber-300 font-bold rounded-xl text-xs shrink-0 shadow-xs"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                        <span>Open ↗</span>
-                      </a>
+                  <div className="p-3.5 bg-white rounded-xl border border-amber-300 shadow-2xs space-y-1.5">
+                    <span className="text-amber-900 block text-[10px] uppercase font-bold tracking-wider">Designated Accountant Login Credentials (Unique ID):</span>
+                    <div className="flex items-center justify-between text-xs">
+                      <span>Full Name: <strong>{generatedCredentials.accountant}</strong></span>
+                      <span className="bg-amber-100 text-amber-900 px-2 py-0.5 rounded font-bold">Role: Accountant</span>
+                    </div>
+                    <div className="text-xs text-gray-900">
+                      Mobile Number (Unique Login ID): <strong className="text-amber-900 font-bold">{generatedCredentials.accountantPhone}</strong>
+                    </div>
+                    <div className="text-[11px] text-stone-600 bg-amber-50/70 p-2 rounded-lg border border-amber-200">
+                      How to log in: Open <strong>Firm Member Portal</strong> → Enter Firm Code <strong>{generatedCredentials.firmCode}</strong> → Mobile <strong>{generatedCredentials.accountantPhone}</strong> → Default PIN: <strong>9999</strong>
                     </div>
                   </div>
 
-                  {/* Link 2: Field Partner Mobile Tester */}
-                  <div className="space-y-1 pt-2 border-t border-amber-200/60">
-                    <span className="text-[11px] font-bold text-gray-700 block">
-                      📱 Tester 2: Field Partner Mobile Link
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        readOnly
-                        value={`${getBaseUrl()}?role=field_partner&firmId=${generatedCredentials.firmId}&standalone=true`}
-                        className="flex-1 bg-white border border-gray-300 rounded-xl px-2.5 py-1 text-[11px] font-mono text-gray-800 select-all"
-                      />
-                      <button
-                        type="button"
-                        onClick={() =>
-                          copyLinkToClipboard(
-                            `${getBaseUrl()}?role=field_partner&firmId=${generatedCredentials.firmId}&standalone=true`,
-                            'new_partner_link'
-                          )
-                        }
-                        className="flex items-center gap-1 px-3 py-1 bg-[#FFB800] hover:bg-amber-400 text-gray-950 font-bold rounded-xl text-xs shrink-0 shadow-xs cursor-pointer"
-                      >
-                        {copiedKey === 'new_partner_link' ? (
-                          <>
-                            <Check className="w-3.5 h-3.5 text-emerald-800" />
-                            <span>Copied</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="w-3.5 h-3.5" />
-                            <span>Copy Link</span>
-                          </>
-                        )}
-                      </button>
-                      <a
-                        href={`${getBaseUrl()}?role=field_partner&firmId=${generatedCredentials.firmId}&standalone=true`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 px-3 py-1 bg-gray-900 hover:bg-black text-amber-300 font-bold rounded-xl text-xs shrink-0 shadow-xs"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                        <span>Open ↗</span>
-                      </a>
+                  <div className="p-3 bg-white rounded-xl border border-gray-200 space-y-1 font-sans text-xs">
+                    <span className="text-gray-500 block text-[10px] uppercase font-bold tracking-wider">Firm Ownership & Project Partner Access Architecture:</span>
+                    <div className="text-gray-800">
+                      Proprietor / Promoter: <strong>{generatedCredentials.proprietor}</strong> ({generatedCredentials.proprietorPhone})
                     </div>
+                    <p className="text-[11px] text-gray-600 mt-1">
+                      • The proprietor is registered for firm ownership &amp; compliance records (not a system login user).
+                    </p>
+                    <p className="text-[11px] text-gray-600">
+                      • Only the Accountant mobile number can sign in to operate this firm's account and ledgers.
+                    </p>
+                    <p className="text-[11px] text-gray-600">
+                      • Field Partners will be enrolled as individual login users with their respective mobile numbers at the project level when projects are created.
+                    </p>
+                  </div>
+
+                  <div className="pt-1 text-[11px] text-gray-600 font-sans">
+                    <span className="font-bold text-gray-800">Active Business Sectors: </span>
+                    {generatedCredentials.sectors.map((s) => s.replace('real_estate_', '').replace('_', ' ')).join(', ')}
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const accUrl = `${getBaseUrl()}?role=accountant&firmId=${generatedCredentials.firmId}&standalone=true`;
-                      const partUrl = `${getBaseUrl()}?role=field_partner&firmId=${generatedCredentials.firmId}&standalone=true`;
-                      const text = `🏢 SyndicateOS Testing Access\nFirm: ${generatedCredentials.firmName} (${generatedCredentials.firmCode})\nProprietor: ${generatedCredentials.proprietor}\n\n👔 TESTER 1 (FIRM ACCOUNTANT):\nPortal Link: ${accUrl}\nLogin: ${generatedCredentials.accountantLogin}\nPassword: ${generatedCredentials.accountantPass}\nTask: Add projects, configure bank accounts, onboard partners, and record investments.\n\n📱 TESTER 2 (PARTNER MOBILE):\nPortal Link: ${partUrl}\nLogin: ${generatedCredentials.partnerLogin}\nPassword: ${generatedCredentials.partnerPass}\nTask: View equity passbook, ratify/approve investments, and submit field expenses.`;
-                      copyLinkToClipboard(text, 'full_package');
-                    }}
-                    className="px-4 py-2 bg-gray-900 hover:bg-black text-amber-300 font-bold rounded-full shadow-xs flex items-center gap-1.5"
-                  >
-                    {copiedKey === 'full_package' ? (
-                      <>
-                        <Check className="w-3.5 h-3.5 text-emerald-400" />
-                        <span>Package Copied to Clipboard!</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-3.5 h-3.5" />
-                        <span>Copy Full WhatsApp/Email Invite Package</span>
-                      </>
-                    )}
-                  </button>
-
+                <div className="flex items-center justify-end pt-2">
                   <button
                     type="button"
                     onClick={resetModal}
-                    className="px-6 py-2 bg-[#FFB800] hover:bg-amber-400 text-gray-950 font-black rounded-full shadow border border-amber-600/30"
+                    className="px-6 py-2.5 bg-[#FFB800] hover:bg-amber-400 text-gray-950 font-black rounded-full shadow border border-amber-600/30 cursor-pointer"
                   >
-                    Done & Return to Console
+                    Done & Return to Registry
                   </button>
                 </div>
               </div>
@@ -1453,14 +1339,24 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
 
               {/* Legal Name & Entity Type */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="sm:col-span-2">
+                <div>
                   <label className="block text-gray-700 font-bold mb-1">Firm Legal Name *</label>
                   <input
                     type="text"
                     required
                     value={editFirmName}
                     onChange={(e) => setEditFirmName(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-[#FFB800] outline-none font-bold"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-[#FFB800] outline-none font-bold text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-gray-700 font-bold mb-1">Firm Code (Tenant ID) *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editFirmCode}
+                    onChange={(e) => setEditFirmCode(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, ''))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-[#FFB800] outline-none font-mono font-black uppercase text-xs"
                   />
                 </div>
                 <div>
@@ -1468,7 +1364,7 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
                   <select
                     value={editBusinessType}
                     onChange={(e) => setEditBusinessType(e.target.value as any)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-xl bg-white focus:ring-2 focus:ring-[#FFB800] outline-none font-bold"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-xl bg-white focus:ring-2 focus:ring-[#FFB800] outline-none font-bold text-xs"
                   >
                     <option value="LLP">LLP</option>
                     <option value="Proprietorship">Proprietorship</option>
@@ -1896,220 +1792,6 @@ export const SuperAdminView: React.FC<SuperAdminViewProps> = ({
                   <span>Edit Firm Details</span>
                 </button>
               </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* TESTER LINKS MODAL FOR SPECIFIC FIRM */}
-      {linksModalFirm && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-xl w-full overflow-hidden shadow-2xl border border-gray-200 animate-in fade-in zoom-in-95">
-            <div className="bg-[#111827] p-5 text-white flex items-center justify-between border-b border-gray-800">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-[#FFB800] text-gray-950 flex items-center justify-center font-black">
-                  <ExternalLink className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-black text-sm text-amber-400">Direct Tester Links & Portals</h3>
-                  <p className="text-[11px] text-gray-400">
-                    Firm: <span className="text-white font-bold">{linksModalFirm.name}</span> ({linksModalFirm.code})
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setLinksModalFirm(null)}
-                className="text-gray-400 hover:text-white p-1 rounded-full hover:bg-gray-800"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-6 space-y-4 text-xs">
-              {/* Google 403 & Sharing Guide Notice */}
-              <div className="bg-blue-50 border border-blue-200 rounded-2xl p-3.5 text-blue-950 space-y-1.5">
-                <div className="flex items-center gap-2 font-bold text-blue-900 text-xs">
-                  <AlertCircle className="w-4 h-4 text-blue-600 shrink-0" />
-                  <span>How to test without Google 403 errors:</span>
-                </div>
-                <p className="text-[11px] text-blue-800 leading-relaxed">
-                  • <strong>For You (Immediate Testing):</strong> Click <span className="font-bold text-blue-950 underline">Preview in This Tab</span> below to test without opening a new window or hitting Google's auth bridge.<br/>
-                  • <strong>For External Testers (Other Laptops / Phones):</strong> Click the <strong>"Share"</strong> button in the AI Studio top bar (next to Remix/Publish) to activate public access, then switch the toggle below to <strong>Public Link (ais-pre)</strong>.
-                </p>
-              </div>
-
-              {/* Domain Mode Selector Toggle */}
-              <div className="flex items-center justify-between bg-gray-100 p-2 rounded-2xl border border-gray-200">
-                <span className="text-[11px] font-bold text-gray-700 pl-2">Target Link Environment:</span>
-                <div className="flex items-center gap-1 bg-white p-1 rounded-xl shadow-2xs border border-gray-200">
-                  <button
-                    type="button"
-                    onClick={() => setUrlMode('dev')}
-                    className={`px-3 py-1 rounded-lg font-bold text-[11px] transition-all cursor-pointer ${
-                      urlMode === 'dev'
-                        ? 'bg-amber-400 text-gray-950 shadow-xs'
-                        : 'text-gray-600 hover:text-gray-950'
-                    }`}
-                  >
-                    Active Session (ais-dev)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setUrlMode('public')}
-                    className={`px-3 py-1 rounded-lg font-bold text-[11px] transition-all cursor-pointer ${
-                      urlMode === 'public'
-                        ? 'bg-blue-600 text-white shadow-xs'
-                        : 'text-gray-600 hover:text-gray-950'
-                    }`}
-                  >
-                    Public / Client (ais-pre)
-                  </button>
-                </div>
-              </div>
-
-              {/* Link 1: Firm Accountant Tester Link */}
-              <div className="bg-gray-50 rounded-2xl p-4 border border-gray-200 space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 font-black text-gray-950">
-                    <Building2 className="w-4 h-4 text-blue-600" />
-                    <span>1. Firm Accountant Portal Link</span>
-                  </div>
-                  <span className="text-[10px] font-bold uppercase bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full">
-                    Tester 1
-                  </span>
-                </div>
-                <p className="text-[11px] text-gray-600">
-                  Direct workspace for Firm Accountant to add projects, syndicate partners, bank accounts, and investments.
-                </p>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    readOnly
-                    value={`${getBaseUrl()}?role=accountant&firmId=${linksModalFirm.id}&standalone=true`}
-                    className="flex-1 bg-white border border-gray-300 rounded-xl px-3 py-1.5 text-[11px] font-mono text-gray-800 select-all"
-                  />
-                  <button
-                    type="button"
-                    onClick={() =>
-                      copyLinkToClipboard(
-                        `${getBaseUrl()}?role=accountant&firmId=${linksModalFirm.id}&standalone=true`,
-                        'firm_acc_link'
-                      )
-                    }
-                    className="flex items-center gap-1 px-3 py-1.5 bg-[#FFB800] hover:bg-amber-400 text-gray-950 font-bold rounded-xl shadow-xs transition-colors shrink-0 cursor-pointer"
-                  >
-                    {copiedKey === 'firm_acc_link' ? (
-                      <>
-                        <Check className="w-3.5 h-3.5 text-emerald-800" />
-                        <span>Copied!</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-3.5 h-3.5" />
-                        <span>Copy Link</span>
-                      </>
-                    )}
-                  </button>
-                  <a
-                    href={`${getBaseUrl()}?role=accountant&firmId=${linksModalFirm.id}&standalone=true`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1 px-3 py-1.5 bg-gray-900 hover:bg-black text-amber-300 font-bold rounded-xl text-xs shrink-0 shadow-xs"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                    <span>Open in New Tab ↗</span>
-                  </a>
-                </div>
-              </div>
-
-              {/* Link 2: Field Partner Mobile Portal Link */}
-              <div className="bg-gray-50 rounded-2xl p-4 border border-gray-200 space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 font-black text-gray-950">
-                    <Smartphone className="w-4 h-4 text-emerald-600" />
-                    <span>2. Partner Mobile Portal Link</span>
-                  </div>
-                  <span className="text-[10px] font-bold uppercase bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
-                    Tester 2
-                  </span>
-                </div>
-                <p className="text-[11px] text-gray-600">
-                  Direct portal for Syndicate Partner to log in, view live equity passbook, ratify/approve investments, and log expenses.
-                </p>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    readOnly
-                    value={`${getBaseUrl()}?role=field_partner&firmId=${linksModalFirm.id}&standalone=true`}
-                    className="flex-1 bg-white border border-gray-300 rounded-xl px-3 py-1.5 text-[11px] font-mono text-gray-800 select-all"
-                  />
-                  <button
-                    type="button"
-                    onClick={() =>
-                      copyLinkToClipboard(
-                        `${getBaseUrl()}?role=field_partner&firmId=${linksModalFirm.id}&standalone=true`,
-                        'firm_part_link'
-                      )
-                    }
-                    className="flex items-center gap-1 px-3 py-1.5 bg-[#FFB800] hover:bg-amber-400 text-gray-950 font-bold rounded-xl shadow-xs transition-colors shrink-0 cursor-pointer"
-                  >
-                    {copiedKey === 'firm_part_link' ? (
-                      <>
-                        <Check className="w-3.5 h-3.5 text-emerald-800" />
-                        <span>Copied!</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-3.5 h-3.5" />
-                        <span>Copy Link</span>
-                      </>
-                    )}
-                  </button>
-                  <a
-                    href={`${getBaseUrl()}?role=field_partner&firmId=${linksModalFirm.id}&standalone=true`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1 px-3 py-1.5 bg-gray-900 hover:bg-black text-amber-300 font-bold rounded-xl text-xs shrink-0 shadow-xs"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                    <span>Open in New Tab ↗</span>
-                  </a>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-gray-50 p-4 border-t border-gray-200 flex items-center justify-between">
-              <button
-                type="button"
-                onClick={() => {
-                  const accUrl = `${getBaseUrl()}?role=accountant&firmId=${linksModalFirm.id}&standalone=true`;
-                  const partUrl = `${getBaseUrl()}?role=field_partner&firmId=${linksModalFirm.id}&standalone=true`;
-                  const text = `🏢 SyndicateOS Testing Access - ${linksModalFirm.name} (${linksModalFirm.code})\n\n👔 Tester 1 (Firm Accountant):\nLink: ${accUrl}\nTasks: Add projects, configure bank accounts, onboard partners, and record investments.\n\n📱 Tester 2 (Partner Mobile):\nLink: ${partUrl}\nTasks: View equity passbook, ratify/approve investments, and log field expenses.`;
-                  copyLinkToClipboard(text, 'share_all');
-                }}
-                className="px-4 py-2 bg-gray-900 hover:bg-black text-amber-300 font-bold rounded-full text-xs shadow-xs flex items-center gap-1.5"
-              >
-                {copiedKey === 'share_all' ? (
-                  <>
-                    <Check className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Copied Package!</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-3.5 h-3.5" />
-                    <span>Copy Full Invite Text</span>
-                  </>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setLinksModalFirm(null)}
-                className="px-5 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold rounded-full text-xs"
-              >
-                Close
-              </button>
             </div>
           </div>
         </div>

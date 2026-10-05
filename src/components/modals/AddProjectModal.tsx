@@ -276,7 +276,17 @@ export const AddProjectModal: React.FC<AddProjectModalProps> = ({
   firmAccounts = [],
   onAddFirmAccount,
 }) => {
-  const availableFirmAccounts = firmAccounts.filter((a) => a.firmId === firm.id);
+  // Dedicated Project Accounts available in this modal:
+  // - Cash accounts (field_petty_cash / Cash Safe Vault) are available for all projects of this firm
+  // - Existing bank accounts already assigned to other projects are filtered out so they never leak into this new project!
+  const availableFirmAccounts = firmAccounts.filter((a) => {
+    if (a.firmId !== firm.id) return false;
+    if (a.accountType === 'field_petty_cash') return true;
+    if (a.linkedProjectId && a.linkedProjectId !== '' && a.linkedProjectId !== 'all') {
+      return false; // belongs to another existing project
+    }
+    return true;
+  });
   const [selectedFirmAccountId, setSelectedFirmAccountId] = useState<string>(() => {
     const primary = availableFirmAccounts.find((a) => a.isPrimary);
     return primary ? primary.id : availableFirmAccounts[0]?.id || '';
@@ -287,7 +297,7 @@ export const AddProjectModal: React.FC<AddProjectModalProps> = ({
     ? 'real_estate_open_plotting'
     : firm.sectors[0] || 'real_estate_open_plotting';
 
-  // Basic Info State
+  // Basic Info State - starts clean with empty fields
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
   const [sector, setSector] = useState<SectorType>(defaultSector);
@@ -299,29 +309,27 @@ export const AddProjectModal: React.FC<AddProjectModalProps> = ({
     return d.toISOString().split('T')[0];
   });
 
-  // Location & Statutory (Dynamic defaults based on sector)
-  const [location, setLocation] = useState(firm.location || 'Vijayawada / CRDA Border');
-  const [mandalDistrict, setMandalDistrict] = useState(
-    firm.state === 'Andhra Pradesh' ? 'Mangalagiri Mandal, Guntur Dt.' : 'Shamshabad Mandal, Ranga Reddy Dt.'
-  );
-  const [surveyNumbers, setSurveyNumbers] = useState('Sy. No. 165/1, 166/2');
-  const [approvalAuthority, setApprovalAuthority] = useState<string>(
-    firm.state === 'Andhra Pradesh' ? 'CRDA' : 'HMDA'
-  );
-  const [lpOrReraNumber, setLpOrReraNumber] = useState(
-    firm.state === 'Andhra Pradesh' ? 'CRDA/LP/2026/058' : 'HMDA/LP/2026/019'
-  );
+  // Location & Statutory - start clean/empty with placeholders
+  const [location, setLocation] = useState('');
+  const [mandalDistrict, setMandalDistrict] = useState('');
+  const [surveyNumbers, setSurveyNumbers] = useState('');
+  const [approvalAuthority, setApprovalAuthority] = useState<string>('');
+  const [lpOrReraNumber, setLpOrReraNumber] = useState('');
 
-  // Specifications
-  const [extentValue, setExtentValue] = useState<number>(6.0);
-  const [extentUnit, setExtentUnit] = useState<string>('Acres');
+  // Specifications - start clean
+  const [extentValue, setExtentValue] = useState<number>(0);
+  const [extentUnit, setExtentUnit] = useState<string>(
+    defaultSector === 'real_estate_construction' ? 'Units / Flats' :
+    defaultSector === 'liquor_vends' ? 'Counters / Shops' :
+    defaultSector === 'custom_infra' ? 'KM Stretch' : 'Acres'
+  );
   const [roadWidth, setRoadWidth] = useState<20 | 30 | 40 | 60>(30);
   const [openSpacePercent, setOpenSpacePercent] = useState<number>(10);
-  const [floorRatePerSqYard, setFloorRatePerSqYard] = useState<number>(18500);
-  const [baseSqFtRate, setBaseSqFtRate] = useState<number>(4800);
-  const [totalEstimatedOutlay, setTotalEstimatedOutlay] = useState<number>(DEFAULT_INITIAL_OUTLAY);
+  const [floorRatePerSqYard, setFloorRatePerSqYard] = useState<number>(0);
+  const [baseSqFtRate, setBaseSqFtRate] = useState<number>(0);
+  const [totalEstimatedOutlay, setTotalEstimatedOutlay] = useState<number>(0);
   const [notes, setNotes] = useState('');
-  const [autoGeneratePlots, setAutoGeneratePlots] = useState(true);
+  const [autoGeneratePlots, setAutoGeneratePlots] = useState(false);
 
   // Sector-specific properties
   const [floorsCount, setFloorsCount] = useState<number>(5);
@@ -382,59 +390,26 @@ export const AddProjectModal: React.FC<AddProjectModalProps> = ({
     setProjectPartners((prev) => syncPartnersCapitalWithTotalOutlay(prev, numericVal));
   };
 
-  // Handle Sector Engine Change dynamically updates ALL downstream fields, smart defaults, and re-syncs partner capital
+  // Handle Sector Engine Change dynamically updates unit types and sub-builders without injecting dummy data
   const handleSectorChange = (newSector: SectorType) => {
     setSector(newSector);
 
-    let newOutlay = 48000000;
     if (newSector === 'real_estate_open_plotting') {
-      setApprovalAuthority(firm.state === 'Andhra Pradesh' ? 'CRDA' : 'HMDA');
-      setLpOrReraNumber(firm.state === 'Andhra Pradesh' ? 'CRDA/LP/2026/058' : 'HMDA/LP/2026/019');
-      setSurveyNumbers('Sy. No. 165/1, 166/2');
-      setExtentValue(6.0);
       setExtentUnit('Acres');
-      newOutlay = 48000000;
-      setFloorRatePerSqYard(18500);
     } else if (newSector === 'real_estate_construction') {
-      setApprovalAuthority(firm.state === 'Andhra Pradesh' ? 'AP-RERA' : 'TG-RERA');
-      setLpOrReraNumber(firm.state === 'Andhra Pradesh' ? 'P03240019284' : 'P02400044910');
-      setSurveyNumbers('Sy. No. 89/3, Tadepalli (Plot 14)');
-      setExtentValue(20);
       setExtentUnit('Units / Flats');
-      newOutlay = 42000000;
-      setBaseSqFtRate(4800);
       setFloorsCount(5);
-      setFloorPlans(createInitialFloorPlans(5, 4800));
+      setFloorPlans(createInitialFloorPlans(5, baseSqFtRate || 4800));
     } else if (newSector === 'liquor_vends') {
-      setApprovalAuthority(
-        firm.state === 'Andhra Pradesh'
-          ? 'AP State Beverages Corp (APSBL)'
-          : 'TG State Beverages Corp (TGSBCL)'
-      );
-      setLpOrReraNumber(
-        firm.state === 'Andhra Pradesh' ? 'AP-EXC-GNT-2026/014' : 'TG-EXC-WGL-2025-089'
-      );
-      setSurveyNumbers('Excise Shop #04, #05, #08, #12');
-      setExtentValue(4);
       setExtentUnit('Counters / Shops');
       setCountersCount(4);
-      setDailySalesTarget(350000);
-      setSecurityDeposit(5000000);
-      newOutlay = 45000000;
     } else if (newSector === 'custom_infra') {
-      setApprovalAuthority('Roads & Buildings (R&B) Dept');
-      setLpOrReraNumber('GMC/INFRA/2026/012');
-      setSurveyNumbers('Market Yard Road Stretch KM 0/0 - 3/5');
-      setExtentValue(3.5);
       setExtentUnit('KM Stretch');
       setContractType('Item-Rate Schedule (BoQ)');
       setRetentionPercent(5.0);
-      newOutlay = 65000000;
     }
 
-    setTotalEstimatedOutlay(newOutlay);
-
-    // Update partner roles and synchronize partner capital estimated invest values to match newOutlay exactly
+    // Update partner roles based on new sector
     setProjectPartners((prev) => {
       const updatedRoles = prev.map((p, idx) => {
         let role = p.roleInProject;
@@ -472,7 +447,9 @@ export const AddProjectModal: React.FC<AddProjectModalProps> = ({
           roleInProject: role,
         };
       });
-      return syncPartnersCapitalWithTotalOutlay(updatedRoles, newOutlay);
+      return totalEstimatedOutlay > 0
+        ? syncPartnersCapitalWithTotalOutlay(updatedRoles, totalEstimatedOutlay)
+        : updatedRoles;
     });
   };
 
@@ -1237,8 +1214,9 @@ export const AddProjectModal: React.FC<AddProjectModalProps> = ({
                           <input
                             type="number"
                             step="0.1"
-                            min="0.1"
-                            value={extentValue}
+                            min="0"
+                            placeholder="e.g. 6.0"
+                            value={extentValue === 0 ? '' : extentValue}
                             onChange={(e) => setExtentValue(parseFloat(e.target.value) || 0)}
                             className="w-full px-3 py-2 bg-white border border-gray-300 rounded-xl text-xs font-black text-gray-950 focus:ring-2 focus:ring-[#FFB800] outline-none"
                           />
@@ -1274,7 +1252,8 @@ export const AddProjectModal: React.FC<AddProjectModalProps> = ({
                           <input
                             type="number"
                             step="100"
-                            value={floorRatePerSqYard}
+                            placeholder="e.g. 18500"
+                            value={floorRatePerSqYard === 0 ? '' : floorRatePerSqYard}
                             onChange={(e) => setFloorRatePerSqYard(parseInt(e.target.value) || 0)}
                             className="w-full pl-6 pr-3 py-2 bg-white border border-gray-300 rounded-xl text-xs font-black text-gray-950 focus:ring-2 focus:ring-[#FFB800] outline-none"
                           />
@@ -1290,7 +1269,8 @@ export const AddProjectModal: React.FC<AddProjectModalProps> = ({
                           <input
                             type="number"
                             step="100000"
-                            value={totalEstimatedOutlay}
+                            placeholder="e.g. 48000000"
+                            value={totalEstimatedOutlay === 0 ? '' : totalEstimatedOutlay}
                             onChange={(e) => handleOutlayChange(parseInt(e.target.value) || 0)}
                             className="w-full pl-6 pr-3 py-2 bg-white border-2 border-amber-300 rounded-xl text-xs font-black text-gray-950 focus:ring-2 focus:ring-[#FFB800] outline-none"
                           />
@@ -1401,7 +1381,8 @@ export const AddProjectModal: React.FC<AddProjectModalProps> = ({
                           <input
                             type="number"
                             step="50"
-                            value={baseSqFtRate}
+                            placeholder="e.g. 4800"
+                            value={baseSqFtRate === 0 ? '' : baseSqFtRate}
                             onChange={(e) => {
                               const val = parseInt(e.target.value) || 0;
                               setBaseSqFtRate(val);
@@ -1434,7 +1415,8 @@ export const AddProjectModal: React.FC<AddProjectModalProps> = ({
                           <input
                             type="number"
                             step="100000"
-                            value={totalEstimatedOutlay}
+                            placeholder="e.g. 42000000"
+                            value={totalEstimatedOutlay === 0 ? '' : totalEstimatedOutlay}
                             onChange={(e) => handleOutlayChange(parseInt(e.target.value) || 0)}
                             className="w-full pl-6 pr-3 py-2 bg-white border-2 border-amber-300 rounded-xl text-xs font-black text-gray-950 focus:ring-2 focus:ring-[#FFB800] outline-none"
                           />
@@ -1868,21 +1850,24 @@ export const AddProjectModal: React.FC<AddProjectModalProps> = ({
                           >
                             {partner.name ? partner.name.charAt(0).toUpperCase() : 'P'}
                           </div>
-                          <div className="flex-1">
+                          <div className="flex-1 space-y-1">
                             <input
                               type="text"
                               placeholder="Partner Name (e.g. R. Venkatesh)"
                               value={partner.name}
                               onChange={(e) => handlePartnerChange(idx, 'name', e.target.value)}
-                              className="w-full text-xs font-bold text-gray-950 border-b border-dashed border-gray-300 focus:border-amber-500 outline-none pb-0.5 bg-transparent"
+                              className="w-full text-xs font-bold text-gray-950 border-b border-gray-300 focus:border-amber-500 outline-none pb-0.5 bg-transparent"
                             />
-                            <input
-                              type="text"
-                              placeholder="+91 Mobile"
-                              value={partner.phone}
-                              onChange={(e) => handlePartnerChange(idx, 'phone', e.target.value)}
-                              className="w-full text-[10px] text-gray-500 border-none outline-none p-0 bg-transparent"
-                            />
+                            <div className="flex items-center gap-1 bg-amber-50/80 px-2 py-1 rounded-md border border-amber-200">
+                              <span className="text-[9px] uppercase font-black text-amber-800 shrink-0">User ID (Mobile):</span>
+                              <input
+                                type="tel"
+                                placeholder="+91 98480 XXXXX"
+                                value={partner.phone}
+                                onChange={(e) => handlePartnerChange(idx, 'phone', e.target.value)}
+                                className="w-full text-xs font-mono font-bold text-gray-900 border-none outline-none p-0 bg-transparent placeholder:text-gray-400"
+                              />
+                            </div>
                           </div>
                         </div>
 

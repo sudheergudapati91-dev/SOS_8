@@ -270,6 +270,17 @@ export default function App() {
     return null;
   });
 
+  // Effective partner session computed from currentUser or fieldPartnerSession
+  const effectivePartnerSession = useMemo(() => {
+    if (currentUser && (currentUser.role === 'field_partner' || currentUser.role === 'managing_partner')) {
+      return {
+        firmId: currentUser.firmId || selectedFirmId || firms[0]?.id || '',
+        partnerId: currentUser.partnerId || `partner-${currentUser.phone}`,
+      };
+    }
+    return fieldPartnerSession;
+  }, [currentUser, selectedFirmId, firms, fieldPartnerSession]);
+
   const handleLoginSuccess = (user: AuthenticatedAppUser) => {
     setCurrentUser(user);
     try {
@@ -893,9 +904,7 @@ export default function App() {
               fixedEquityPercent: p.equityPercent,
               drawings: p.drawings,
               shareOfFieldExpenses: p.shareOfFieldExpenses,
-              userRole: p.roleInProject.toLowerCase().includes('managing')
-                ? 'managing_partner'
-                : 'field_partner',
+              userRole: 'field_partner',
               userStatus: 'active',
               pinCode: '1234',
               dailySpendingLimit: 50000,
@@ -1134,29 +1143,55 @@ export default function App() {
 
   // Syndicate partner updates
   const handleUpdatePartner = (updatedPartner: SyndicatePartner) => {
-    setPartners(partners.map((p) => (p.id === updatedPartner.id ? updatedPartner : p)));
+    const cleanUpdatedPhone = (updatedPartner.phone || '').replace(/\D/g, '').slice(-10);
+
+    setPartners((prev) => {
+      const idx = prev.findIndex(
+        (p) =>
+          String(p.id) === String(updatedPartner.id) ||
+          (cleanUpdatedPhone && (p.phone || '').replace(/\D/g, '').slice(-10) === cleanUpdatedPhone) ||
+          p.name.trim().toLowerCase() === updatedPartner.name.trim().toLowerCase()
+      );
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = { ...next[idx], ...updatedPartner };
+        return next;
+      }
+      return [...prev, updatedPartner];
+    });
+
     saveDocument('partners', updatedPartner.id, updatedPartner);
     savePartnerToSql(updatedPartner);
 
-    // Synchronize into the active project's partner list as well
+    // Synchronize into all projects partner list where this partner exists
     setProjects((prevProjects) =>
       prevProjects.map((proj) => {
-        if (proj.id === selectedProjectId) {
-          const updatedPartnerShares = proj.partners.map((ps) => {
-            if (String(ps.partnerId) === String(updatedPartner.id) || ps.name.trim().toLowerCase() === updatedPartner.name.trim().toLowerCase()) {
-              return {
-                ...ps,
-                name: updatedPartner.name,
-                phone: updatedPartner.phone,
-                equityPercent: updatedPartner.fixedEquityPercent,
-                initialCapital: updatedPartner.initialCapital,
-                actualInvested: updatedPartner.actualInvested,
-                drawings: updatedPartner.drawings,
-                shareOfFieldExpenses: updatedPartner.shareOfFieldExpenses,
-              };
-            }
-            return ps;
-          });
+        let hasMatch = false;
+        const updatedPartnerShares = (proj.partners || []).map((ps) => {
+          const matchId = String(ps.partnerId) === String(updatedPartner.id);
+          const matchName = ps.name.trim().toLowerCase() === updatedPartner.name.trim().toLowerCase();
+          const matchPhone = cleanUpdatedPhone && (ps.phone || '').replace(/\D/g, '').slice(-10) === cleanUpdatedPhone;
+
+          if (matchId || matchName || matchPhone) {
+            hasMatch = true;
+            return {
+              ...ps,
+              name: updatedPartner.name,
+              phone: updatedPartner.phone,
+              equityPercent: updatedPartner.fixedEquityPercent,
+              initialCapital: updatedPartner.initialCapital,
+              actualInvested: updatedPartner.actualInvested,
+              drawings: updatedPartner.drawings,
+              shareOfFieldExpenses: updatedPartner.shareOfFieldExpenses,
+              userStatus: updatedPartner.userStatus,
+              pinCode: updatedPartner.pinCode,
+              mustChangePin: updatedPartner.mustChangePin,
+            };
+          }
+          return ps;
+        });
+
+        if (hasMatch) {
           const updatedProj = {
             ...proj,
             partners: updatedPartnerShares,
@@ -1796,7 +1831,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F4F4F6] text-gray-950 flex flex-col font-sans selection:bg-amber-400 selection:text-gray-950">
+    <div className="min-h-screen bg-[#FDFCF7] text-slate-900 flex flex-col font-sans selection:bg-amber-100 selection:text-amber-900">
       {/* Top Header with Role Switcher & Tenant Info */}
       <Header
         currentRole={currentRole}
@@ -1956,18 +1991,20 @@ export default function App() {
             <FieldPartnerMobileView
               firm={currentFirm}
               firms={firms}
-              partners={currentFirmPartners}
+              currentUser={currentUser}
+              onSelectFirm={(firmId) => {
+                setSelectedFirmId(firmId);
+              }}
+              partners={partners}
               plots={plots.filter((p) => p.firmId === currentFirm.id)}
               apartmentUnits={apartmentUnits.filter((u) => u.firmId === currentFirm.id)}
               fieldExpenses={fieldExpenses.filter((e) => !e.firmId || e.firmId === currentFirm.id)}
               onSubmitExpense={handleSubmitFieldExpense}
-              session={fieldPartnerSession}
+              session={effectivePartnerSession}
               onLogin={handleFieldPartnerLogin}
               onLogout={handleSignOut}
               onUpdatePlot={handleUpdatePlot}
-              projects={projects.filter(
-                (p) => p.firmId === currentFirm.id && currentFirm.sectors.includes(p.sector)
-              )}
+              projects={projects}
               selectedProjectId={selectedProjectId}
               onSelectProject={setSelectedProjectId}
               layoutCalc={layoutCalc}
