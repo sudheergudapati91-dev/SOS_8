@@ -52,24 +52,24 @@ export const OpenPlottingPlanBuilder: React.FC<OpenPlottingPlanBuilderProps> = (
       ? extentValue * 48.4
       : extentValue;
 
-  // Ensure default values if undefined
-  const eastCount = distribution.eastPlotsCount ?? distribution.premiumPlotsCount ?? 12;
-  const eastArea = distribution.eastAreaSqYards ?? distribution.premiumAreaSqYards ?? 267;
+  // Ensure default values if undefined (defaults to 0, no hardcoded limitations)
+  const eastCount = distribution.eastPlotsCount ?? distribution.premiumPlotsCount ?? 0;
+  const eastArea = distribution.eastAreaSqYards ?? distribution.premiumAreaSqYards ?? 0;
 
-  const northCount = distribution.northPlotsCount ?? 10;
-  const northArea = distribution.northAreaSqYards ?? 220;
+  const northCount = distribution.northPlotsCount ?? 0;
+  const northArea = distribution.northAreaSqYards ?? 0;
 
-  const westCount = distribution.westPlotsCount ?? distribution.standardPlotsCount ?? 14;
-  const westArea = distribution.westAreaSqYards ?? distribution.standardAreaSqYards ?? 200;
+  const westCount = distribution.westPlotsCount ?? distribution.standardPlotsCount ?? 0;
+  const westArea = distribution.westAreaSqYards ?? distribution.standardAreaSqYards ?? 0;
 
-  const southCount = distribution.southPlotsCount ?? 8;
-  const southArea = distribution.southAreaSqYards ?? 180;
+  const southCount = distribution.southPlotsCount ?? 0;
+  const southArea = distribution.southAreaSqYards ?? 0;
 
-  const cornerCount = distribution.cornerPlotsCount ?? 6;
-  const cornerArea = distribution.cornerAreaSqYards ?? 300;
+  const cornerCount = distribution.cornerPlotsCount ?? 0;
+  const cornerArea = distribution.cornerAreaSqYards ?? 0;
 
-  const commercialCount = distribution.commercialPlotsCount ?? 2;
-  const commercialArea = distribution.commercialAreaSqYards ?? 400;
+  const commercialCount = distribution.commercialPlotsCount ?? 0;
+  const commercialArea = distribution.commercialAreaSqYards ?? 0;
 
   // Subtotals
   const totalEastArea = eastCount * eastArea;
@@ -89,26 +89,27 @@ export const OpenPlottingPlanBuilder: React.FC<OpenPlottingPlanBuilderProps> = (
   const estimatedRoadArea = Math.round(totalExtentSqYds * (roadWidth >= 40 ? 0.28 : 0.22));
 
   const handleUpdate = (field: keyof PlotDistributionConfig, val: number) => {
+    const numVal = isNaN(val) ? 0 : Math.max(0, val);
     onDistributionChange({
       ...distribution,
-      eastPlotsCount: field === 'eastPlotsCount' ? val : eastCount,
-      eastAreaSqYards: field === 'eastAreaSqYards' ? val : eastArea,
-      northPlotsCount: field === 'northPlotsCount' ? val : northCount,
-      northAreaSqYards: field === 'northAreaSqYards' ? val : northArea,
-      westPlotsCount: field === 'westPlotsCount' ? val : westCount,
-      westAreaSqYards: field === 'westAreaSqYards' ? val : westArea,
-      southPlotsCount: field === 'southPlotsCount' ? val : southCount,
-      southAreaSqYards: field === 'southAreaSqYards' ? val : southArea,
-      cornerPlotsCount: field === 'cornerPlotsCount' ? val : cornerCount,
-      cornerAreaSqYards: field === 'cornerAreaSqYards' ? val : cornerArea,
-      commercialPlotsCount: field === 'commercialPlotsCount' ? val : commercialCount,
-      commercialAreaSqYards: field === 'commercialAreaSqYards' ? val : commercialArea,
+      eastPlotsCount: field === 'eastPlotsCount' ? numVal : eastCount,
+      eastAreaSqYards: field === 'eastAreaSqYards' ? numVal : eastArea,
+      northPlotsCount: field === 'northPlotsCount' ? numVal : northCount,
+      northAreaSqYards: field === 'northAreaSqYards' ? numVal : northArea,
+      westPlotsCount: field === 'westPlotsCount' ? numVal : westCount,
+      westAreaSqYards: field === 'westAreaSqYards' ? numVal : westArea,
+      southPlotsCount: field === 'southPlotsCount' ? numVal : southCount,
+      southAreaSqYards: field === 'southAreaSqYards' ? numVal : southArea,
+      cornerPlotsCount: field === 'cornerPlotsCount' ? numVal : cornerCount,
+      cornerAreaSqYards: field === 'cornerAreaSqYards' ? numVal : cornerArea,
+      commercialPlotsCount: field === 'commercialPlotsCount' ? numVal : commercialCount,
+      commercialAreaSqYards: field === 'commercialAreaSqYards' ? numVal : commercialArea,
       // Keep standard & premium in sync for backward compatibility
-      standardPlotsCount: field === 'westPlotsCount' ? val : westCount,
-      standardAreaSqYards: field === 'westAreaSqYards' ? val : westArea,
-      premiumPlotsCount: field === 'eastPlotsCount' ? val : eastCount,
-      premiumAreaSqYards: field === 'eastAreaSqYards' ? val : eastArea,
-      [field]: Math.max(0, val),
+      standardPlotsCount: field === 'westPlotsCount' ? numVal : westCount,
+      standardAreaSqYards: field === 'westAreaSqYards' ? numVal : westArea,
+      premiumPlotsCount: field === 'eastPlotsCount' ? numVal : eastCount,
+      premiumAreaSqYards: field === 'eastAreaSqYards' ? numVal : eastArea,
+      [field]: numVal,
     });
   };
 
@@ -188,8 +189,9 @@ export const OpenPlottingPlanBuilder: React.FC<OpenPlottingPlanBuilderProps> = (
               <input
                 type="number"
                 min="0"
-                value={eastCount}
-                onChange={(e) => handleUpdate('eastPlotsCount', parseInt(e.target.value) || 0)}
+                placeholder="0"
+                value={eastCount === 0 ? '' : eastCount}
+                onChange={(e) => handleUpdate('eastPlotsCount', e.target.value === '' ? 0 : Number(e.target.value))}
                 className="w-full px-2 py-1.5 bg-white border border-amber-300 rounded-lg text-xs font-black text-gray-950 outline-none"
               />
             </div>
@@ -197,10 +199,11 @@ export const OpenPlottingPlanBuilder: React.FC<OpenPlottingPlanBuilderProps> = (
               <label className="block text-[10px] font-bold text-gray-500 uppercase">Area / Plot (Sq.Yds)</label>
               <input
                 type="number"
-                step="10"
-                min="50"
-                value={eastArea}
-                onChange={(e) => handleUpdate('eastAreaSqYards', parseInt(e.target.value) || 0)}
+                step="1"
+                min="0"
+                placeholder="0"
+                value={eastArea === 0 ? '' : eastArea}
+                onChange={(e) => handleUpdate('eastAreaSqYards', e.target.value === '' ? 0 : Number(e.target.value))}
                 className="w-full px-2 py-1.5 bg-white border border-amber-300 rounded-lg text-xs font-bold text-gray-950 outline-none"
               />
             </div>
@@ -230,8 +233,9 @@ export const OpenPlottingPlanBuilder: React.FC<OpenPlottingPlanBuilderProps> = (
               <input
                 type="number"
                 min="0"
-                value={northCount}
-                onChange={(e) => handleUpdate('northPlotsCount', parseInt(e.target.value) || 0)}
+                placeholder="0"
+                value={northCount === 0 ? '' : northCount}
+                onChange={(e) => handleUpdate('northPlotsCount', e.target.value === '' ? 0 : Number(e.target.value))}
                 className="w-full px-2 py-1.5 bg-white border border-blue-300 rounded-lg text-xs font-black text-gray-950 outline-none"
               />
             </div>
@@ -239,10 +243,11 @@ export const OpenPlottingPlanBuilder: React.FC<OpenPlottingPlanBuilderProps> = (
               <label className="block text-[10px] font-bold text-gray-500 uppercase">Area / Plot (Sq.Yds)</label>
               <input
                 type="number"
-                step="10"
-                min="50"
-                value={northArea}
-                onChange={(e) => handleUpdate('northAreaSqYards', parseInt(e.target.value) || 0)}
+                step="1"
+                min="0"
+                placeholder="0"
+                value={northArea === 0 ? '' : northArea}
+                onChange={(e) => handleUpdate('northAreaSqYards', e.target.value === '' ? 0 : Number(e.target.value))}
                 className="w-full px-2 py-1.5 bg-white border border-blue-300 rounded-lg text-xs font-bold text-gray-950 outline-none"
               />
             </div>
@@ -272,8 +277,9 @@ export const OpenPlottingPlanBuilder: React.FC<OpenPlottingPlanBuilderProps> = (
               <input
                 type="number"
                 min="0"
-                value={westCount}
-                onChange={(e) => handleUpdate('westPlotsCount', parseInt(e.target.value) || 0)}
+                placeholder="0"
+                value={westCount === 0 ? '' : westCount}
+                onChange={(e) => handleUpdate('westPlotsCount', e.target.value === '' ? 0 : Number(e.target.value))}
                 className="w-full px-2 py-1.5 bg-white border border-purple-300 rounded-lg text-xs font-black text-gray-950 outline-none"
               />
             </div>
@@ -281,10 +287,11 @@ export const OpenPlottingPlanBuilder: React.FC<OpenPlottingPlanBuilderProps> = (
               <label className="block text-[10px] font-bold text-gray-500 uppercase">Area / Plot (Sq.Yds)</label>
               <input
                 type="number"
-                step="10"
-                min="50"
-                value={westArea}
-                onChange={(e) => handleUpdate('westAreaSqYards', parseInt(e.target.value) || 0)}
+                step="1"
+                min="0"
+                placeholder="0"
+                value={westArea === 0 ? '' : westArea}
+                onChange={(e) => handleUpdate('westAreaSqYards', e.target.value === '' ? 0 : Number(e.target.value))}
                 className="w-full px-2 py-1.5 bg-white border border-purple-300 rounded-lg text-xs font-bold text-gray-950 outline-none"
               />
             </div>
@@ -314,8 +321,9 @@ export const OpenPlottingPlanBuilder: React.FC<OpenPlottingPlanBuilderProps> = (
               <input
                 type="number"
                 min="0"
-                value={southCount}
-                onChange={(e) => handleUpdate('southPlotsCount', parseInt(e.target.value) || 0)}
+                placeholder="0"
+                value={southCount === 0 ? '' : southCount}
+                onChange={(e) => handleUpdate('southPlotsCount', e.target.value === '' ? 0 : Number(e.target.value))}
                 className="w-full px-2 py-1.5 bg-white border border-rose-300 rounded-lg text-xs font-black text-gray-950 outline-none"
               />
             </div>
@@ -323,10 +331,11 @@ export const OpenPlottingPlanBuilder: React.FC<OpenPlottingPlanBuilderProps> = (
               <label className="block text-[10px] font-bold text-gray-500 uppercase">Area / Plot (Sq.Yds)</label>
               <input
                 type="number"
-                step="10"
-                min="50"
-                value={southArea}
-                onChange={(e) => handleUpdate('southAreaSqYards', parseInt(e.target.value) || 0)}
+                step="1"
+                min="0"
+                placeholder="0"
+                value={southArea === 0 ? '' : southArea}
+                onChange={(e) => handleUpdate('southAreaSqYards', e.target.value === '' ? 0 : Number(e.target.value))}
                 className="w-full px-2 py-1.5 bg-white border border-rose-300 rounded-lg text-xs font-bold text-gray-950 outline-none"
               />
             </div>
@@ -356,8 +365,9 @@ export const OpenPlottingPlanBuilder: React.FC<OpenPlottingPlanBuilderProps> = (
               <input
                 type="number"
                 min="0"
-                value={cornerCount}
-                onChange={(e) => handleUpdate('cornerPlotsCount', parseInt(e.target.value) || 0)}
+                placeholder="0"
+                value={cornerCount === 0 ? '' : cornerCount}
+                onChange={(e) => handleUpdate('cornerPlotsCount', e.target.value === '' ? 0 : Number(e.target.value))}
                 className="w-full px-2 py-1.5 bg-white border border-emerald-300 rounded-lg text-xs font-black text-gray-950 outline-none"
               />
             </div>
@@ -365,10 +375,11 @@ export const OpenPlottingPlanBuilder: React.FC<OpenPlottingPlanBuilderProps> = (
               <label className="block text-[10px] font-bold text-gray-500 uppercase">Area / Plot (Sq.Yds)</label>
               <input
                 type="number"
-                step="10"
-                min="50"
-                value={cornerArea}
-                onChange={(e) => handleUpdate('cornerAreaSqYards', parseInt(e.target.value) || 0)}
+                step="1"
+                min="0"
+                placeholder="0"
+                value={cornerArea === 0 ? '' : cornerArea}
+                onChange={(e) => handleUpdate('cornerAreaSqYards', e.target.value === '' ? 0 : Number(e.target.value))}
                 className="w-full px-2 py-1.5 bg-white border border-emerald-300 rounded-lg text-xs font-bold text-gray-950 outline-none"
               />
             </div>
@@ -398,8 +409,9 @@ export const OpenPlottingPlanBuilder: React.FC<OpenPlottingPlanBuilderProps> = (
               <input
                 type="number"
                 min="0"
-                value={commercialCount}
-                onChange={(e) => handleUpdate('commercialPlotsCount', parseInt(e.target.value) || 0)}
+                placeholder="0"
+                value={commercialCount === 0 ? '' : commercialCount}
+                onChange={(e) => handleUpdate('commercialPlotsCount', e.target.value === '' ? 0 : Number(e.target.value))}
                 className="w-full px-2 py-1.5 bg-white border border-indigo-300 rounded-lg text-xs font-black text-gray-950 outline-none"
               />
             </div>
@@ -407,10 +419,11 @@ export const OpenPlottingPlanBuilder: React.FC<OpenPlottingPlanBuilderProps> = (
               <label className="block text-[10px] font-bold text-gray-500 uppercase">Area / Plot (Sq.Yds)</label>
               <input
                 type="number"
-                step="50"
-                min="100"
-                value={commercialArea}
-                onChange={(e) => handleUpdate('commercialAreaSqYards', parseInt(e.target.value) || 0)}
+                step="1"
+                min="0"
+                placeholder="0"
+                value={commercialArea === 0 ? '' : commercialArea}
+                onChange={(e) => handleUpdate('commercialAreaSqYards', e.target.value === '' ? 0 : Number(e.target.value))}
                 className="w-full px-2 py-1.5 bg-white border border-indigo-300 rounded-lg text-xs font-bold text-gray-950 outline-none"
               />
             </div>
@@ -532,10 +545,11 @@ export const OpenPlottingPlanBuilder: React.FC<OpenPlottingPlanBuilderProps> = (
               </label>
               <input
                 type="number"
-                step="50"
-                min="50"
-                value={newAmenityArea}
+                step="1"
+                min="0"
+                value={newAmenityArea === 0 ? '' : newAmenityArea}
                 onChange={(e) => setNewAmenityArea(parseInt(e.target.value) || 0)}
+                placeholder="0"
                 className="w-full px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs font-black text-gray-900 outline-none"
               />
             </div>

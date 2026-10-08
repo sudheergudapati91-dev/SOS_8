@@ -174,23 +174,23 @@ const defaultConstructionAmenities: ProjectAmenity[] = [
 ];
 
 const defaultPlotDistribution: PlotDistributionConfig = {
-  eastPlotsCount: 16,
-  eastAreaSqYards: 267,
-  northPlotsCount: 12,
-  northAreaSqYards: 220,
-  westPlotsCount: 14,
-  westAreaSqYards: 200,
-  southPlotsCount: 8,
-  southAreaSqYards: 180,
-  cornerPlotsCount: 6,
-  cornerAreaSqYards: 330,
-  commercialPlotsCount: 2,
-  commercialAreaSqYards: 500,
+  eastPlotsCount: 0,
+  eastAreaSqYards: 0,
+  northPlotsCount: 0,
+  northAreaSqYards: 0,
+  westPlotsCount: 0,
+  westAreaSqYards: 0,
+  southPlotsCount: 0,
+  southAreaSqYards: 0,
+  cornerPlotsCount: 0,
+  cornerAreaSqYards: 0,
+  commercialPlotsCount: 0,
+  commercialAreaSqYards: 0,
   // backward-compatibility
-  standardPlotsCount: 14,
-  standardAreaSqYards: 200,
-  premiumPlotsCount: 16,
-  premiumAreaSqYards: 267,
+  standardPlotsCount: 0,
+  standardAreaSqYards: 0,
+  premiumPlotsCount: 0,
+  premiumAreaSqYards: 0,
 };
 
 const defaultLayoutAmenities: LayoutAmenity[] = [
@@ -276,13 +276,16 @@ export const AddProjectModal: React.FC<AddProjectModalProps> = ({
   firmAccounts = [],
   onAddFirmAccount,
 }) => {
+  // Project ID established upfront for strict account isolation and mapping
+  const [projectId] = useState<string>(() => `proj-${Date.now().toString().slice(-6)}`);
+
   // Dedicated Project Accounts available in this modal:
   // - Cash accounts (field_petty_cash / Cash Safe Vault) are available for all projects of this firm
   // - Existing bank accounts already assigned to other projects are filtered out so they never leak into this new project!
   const availableFirmAccounts = firmAccounts.filter((a) => {
     if (a.firmId !== firm.id) return false;
     if (a.accountType === 'field_petty_cash') return true;
-    if (a.linkedProjectId && a.linkedProjectId !== '' && a.linkedProjectId !== 'all') {
+    if (a.linkedProjectId && a.linkedProjectId !== '' && a.linkedProjectId !== 'all' && a.linkedProjectId !== projectId) {
       return false; // belongs to another existing project
     }
     return true;
@@ -666,7 +669,7 @@ export const AddProjectModal: React.FC<AddProjectModalProps> = ({
       extentValue:
         sector === 'real_estate_construction'
           ? totalCustomFlats || extentValue
-          : Number(extentValue) || 1,
+          : Number(extentValue) || 0,
       extentUnit,
       roadWidth: sector === 'real_estate_open_plotting' ? roadWidth : undefined,
       openSpacePercent: sector === 'real_estate_open_plotting' ? openSpacePercent : undefined,
@@ -716,8 +719,8 @@ export const AddProjectModal: React.FC<AddProjectModalProps> = ({
       let plotIdCounter = 1;
 
       // 1. East Facing Plots (Sunrise / Vastu)
-      const eastCount = plotDistribution.eastPlotsCount ?? plotDistribution.premiumPlotsCount ?? 16;
-      const eastArea = plotDistribution.eastAreaSqYards ?? plotDistribution.premiumAreaSqYards ?? 267;
+      const eastCount = plotDistribution.eastPlotsCount || 0;
+      const eastArea = plotDistribution.eastAreaSqYards || 0;
       for (let i = 1; i <= eastCount; i++) {
         initialPlots.push({
           id: 5000 + plotIdCounter,
@@ -741,8 +744,8 @@ export const AddProjectModal: React.FC<AddProjectModalProps> = ({
       }
 
       // 2. North Facing Plots (Kubera Vastu)
-      const northCount = plotDistribution.northPlotsCount ?? 12;
-      const northArea = plotDistribution.northAreaSqYards ?? 220;
+      const northCount = plotDistribution.northPlotsCount || 0;
+      const northArea = plotDistribution.northAreaSqYards || 0;
       for (let i = 1; i <= northCount; i++) {
         initialPlots.push({
           id: 5000 + plotIdCounter,
@@ -762,8 +765,8 @@ export const AddProjectModal: React.FC<AddProjectModalProps> = ({
       }
 
       // 3. West Facing Plots (Standard Vastu)
-      const westCount = plotDistribution.westPlotsCount ?? plotDistribution.standardPlotsCount ?? 14;
-      const westArea = plotDistribution.westAreaSqYards ?? plotDistribution.standardAreaSqYards ?? 200;
+      const westCount = plotDistribution.westPlotsCount || 0;
+      const westArea = plotDistribution.westAreaSqYards || 0;
       for (let i = 1; i <= westCount; i++) {
         initialPlots.push({
           id: 5000 + plotIdCounter,
@@ -783,8 +786,8 @@ export const AddProjectModal: React.FC<AddProjectModalProps> = ({
       }
 
       // 4. South Facing Plots (Budget Residential)
-      const southCount = plotDistribution.southPlotsCount ?? 8;
-      const southArea = plotDistribution.southAreaSqYards ?? 180;
+      const southCount = plotDistribution.southPlotsCount || 0;
+      const southArea = plotDistribution.southAreaSqYards || 0;
       for (let i = 1; i <= southCount; i++) {
         initialPlots.push({
           id: 5000 + plotIdCounter,
@@ -804,8 +807,8 @@ export const AddProjectModal: React.FC<AddProjectModalProps> = ({
       }
 
       // 5. Corner Plots (NE / SE Corners)
-      const cornerCount = plotDistribution.cornerPlotsCount ?? 6;
-      const cornerArea = plotDistribution.cornerAreaSqYards ?? 330;
+      const cornerCount = plotDistribution.cornerPlotsCount || 0;
+      const cornerArea = plotDistribution.cornerAreaSqYards || 0;
       for (let i = 1; i <= cornerCount; i++) {
         initialPlots.push({
           id: 5000 + plotIdCounter,
@@ -825,8 +828,8 @@ export const AddProjectModal: React.FC<AddProjectModalProps> = ({
       }
 
       // 6. Commercial Frontage Plots
-      const commercialCount = plotDistribution.commercialPlotsCount ?? 2;
-      const commercialArea = plotDistribution.commercialAreaSqYards ?? 500;
+      const commercialCount = plotDistribution.commercialPlotsCount || 0;
+      const commercialArea = plotDistribution.commercialAreaSqYards || 0;
       for (let i = 1; i <= commercialCount; i++) {
         initialPlots.push({
           id: 5000 + plotIdCounter,
@@ -991,7 +994,7 @@ export const AddProjectModal: React.FC<AddProjectModalProps> = ({
             }`}
           >
             <Landmark className="w-3.5 h-3.5" />
-            <span>Firm Accounts &amp; Banking ({availableFirmAccounts.length})</span>
+            <span>Project Accounts &amp; Banking ({availableFirmAccounts.length})</span>
           </button>
         </div>
 
@@ -2003,16 +2006,16 @@ export const AddProjectModal: React.FC<AddProjectModalProps> = ({
 
             {/* SECTION: PROJECT BANK ACCOUNTS & SETTLEMENT BANKING */}
             {(activeFormTab === 'all' || activeFormTab === 'accounts') && (
-              <div className="bg-white rounded-2xl p-5 border border-amber-300/80 shadow-xs space-y-4">
+              <div className="bg-white rounded-2xl p-5 border border-gray-200 shadow-xs space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-100">
                   <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-900 flex items-center justify-center font-bold">
+                    <div className="w-8 h-8 rounded-xl bg-slate-900 text-amber-400 flex items-center justify-center font-bold">
                       <Landmark className="w-4 h-4" />
                     </div>
                     <div>
                       <h4 className="text-xs font-black uppercase tracking-wider text-gray-950 flex items-center gap-1.5">
                         <span>Project Bank Accounts &amp; Escrow</span>
-                        <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-300">
+                        <span className="text-[10px] font-bold text-gray-700 bg-gray-100 px-2 py-0.5 rounded-full border border-gray-200">
                           {availableFirmAccounts.length} Dedicated Accounts
                         </span>
                       </h4>
@@ -2034,15 +2037,15 @@ export const AddProjectModal: React.FC<AddProjectModalProps> = ({
                 </div>
 
                 {availableFirmAccounts.length === 0 ? (
-                  <div className="p-4 bg-amber-50/60 rounded-xl border border-dashed border-amber-300 text-center space-y-2">
-                    <p className="text-xs font-bold text-gray-800">No project bank accounts registered yet for this project</p>
+                  <div className="p-4 bg-gray-50/80 rounded-xl border border-dashed border-gray-300 text-center space-y-2">
+                    <p className="text-xs font-bold text-gray-800">No bank accounts registered yet for this project</p>
                     <p className="text-[11px] text-gray-500">
                       You can register a dedicated RERA Escrow, Capital Pool, or Commercial Current Account now or later in the Accounts tab.
                     </p>
                     <button
                       type="button"
                       onClick={() => setIsAddAccountSubModalOpen(true)}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-900 text-white text-xs font-bold rounded-xl cursor-pointer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-900 text-white text-xs font-bold rounded-xl cursor-pointer hover:bg-black"
                     >
                       <Plus className="w-3.5 h-3.5" />
                       <span>+ Add Project Bank Account</span>
@@ -2075,7 +2078,7 @@ export const AddProjectModal: React.FC<AddProjectModalProps> = ({
                                 )}
                                 <input
                                   type="radio"
-                                  name="firmAccountSelection"
+                                  name="projectAccountSelection"
                                   checked={isSelected}
                                   onChange={() => setSelectedFirmAccountId(acc.id)}
                                   className="w-3.5 h-3.5 text-amber-600 focus:ring-amber-500 cursor-pointer"
@@ -2187,19 +2190,41 @@ export const AddProjectModal: React.FC<AddProjectModalProps> = ({
         </form>
       </div>
 
-      {/* Sub-modal: Add Firm Account */}
-      <AddFirmAccountModal
-        isOpen={isAddAccountSubModalOpen}
-        onClose={() => setIsAddAccountSubModalOpen(false)}
-        firm={firm}
-        projects={[]}
-        onAddAccount={(newAcc) => {
-          if (onAddFirmAccount) {
-            onAddFirmAccount(newAcc);
-          }
-          setSelectedFirmAccountId(newAcc.id);
-        }}
-      />
+      {/* Sub-modal: Add Project Account */}
+      {isAddAccountSubModalOpen && (
+        <AddFirmAccountModal
+          isOpen={isAddAccountSubModalOpen}
+          onClose={() => setIsAddAccountSubModalOpen(false)}
+          firm={firm}
+          projects={[
+            {
+              id: projectId,
+              firmId: firm.id,
+              name: name.trim() || 'New Project Venture',
+              code: code.trim().toUpperCase() || 'PROJECT',
+              sector,
+              location: location.trim(),
+              status,
+              startDate,
+              targetCompletionDate,
+              partners: projectPartners,
+              extentValue,
+              extentUnit,
+            } as Project,
+          ]}
+          activeProjectId={projectId}
+          onAddAccount={(newAcc) => {
+            const mappedAcc = {
+              ...newAcc,
+              linkedProjectId: projectId,
+            };
+            if (onAddFirmAccount) {
+              onAddFirmAccount(mappedAcc);
+            }
+            setSelectedFirmAccountId(mappedAcc.id);
+          }}
+        />
+      )}
     </div>
   );
 };

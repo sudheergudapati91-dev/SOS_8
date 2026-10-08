@@ -404,7 +404,7 @@ export const AccountantDashboard: React.FC<AccountantDashboardProps> = ({
             Firm Accountant: <strong className="text-gray-800">{firm.accountantName}</strong>
           </p>
           <p className="text-[11px] text-gray-500 mt-0.5">
-            Independent operations &amp; treasury manager for firm accounts, venture projects, partner allocations, and expenditure auditing.
+            Independent operations &amp; treasury manager for project accounts, venture projects, partner allocations, and expenditure auditing.
           </p>
         </div>
 

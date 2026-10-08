@@ -176,20 +176,22 @@ export const AddFirmAccountModal: React.FC<AddFirmAccountModalProps> = ({
         {/* Header - Fixed & Pinned at Top */}
         <div className="sticky top-0 bg-white px-6 py-4 border-b border-gray-200 flex items-center justify-between shrink-0 z-30 shadow-2xs">
           <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-2xl bg-[#FFB800] flex items-center justify-center text-gray-950 font-black shadow-sm border border-amber-500/40 shrink-0">
+            <div className="w-11 h-11 rounded-2xl bg-slate-900 flex items-center justify-center text-amber-400 font-black shadow-sm shrink-0">
               <Landmark className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-gray-100 text-gray-800">
-                  {firm.code}
+                <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-slate-900 text-amber-400">
+                  Project Account
                 </span>
-                <span className="text-xs text-gray-500 font-semibold truncate max-w-xs">
-                  {firm.name}
-                </span>
+                {currentProject && (
+                  <span className="text-xs font-bold text-gray-800 bg-gray-100 px-2 py-0.5 rounded-lg border border-gray-200">
+                    [{currentProject.code}] {currentProject.name}
+                  </span>
+                )}
               </div>
-              <h3 className="text-lg sm:text-xl font-black text-gray-950 flex items-center gap-2">
-                + Add Project Bank Account &amp; Escrow
+              <h3 className="text-lg sm:text-xl font-black text-gray-950 flex items-center gap-2 mt-0.5">
+                + Add Project Account
               </h3>
             </div>
           </div>
@@ -212,7 +214,7 @@ export const AddFirmAccountModal: React.FC<AddFirmAccountModalProps> = ({
             </div>
           )}
 
-          {/* Associated Project Designation */}
+          {/* Associated Project Designation (Mapped to Project Only) */}
           {firmProjects.length > 0 && (
             <div className="bg-gray-50/80 rounded-2xl p-4 border border-gray-200 space-y-2">
               <div className="flex items-center justify-between">
@@ -220,7 +222,7 @@ export const AddFirmAccountModal: React.FC<AddFirmAccountModalProps> = ({
                   <Building2 className="w-3.5 h-3.5 text-amber-600" />
                   <span>Designated Project / Venture</span>
                 </label>
-                <span className="text-[10px] font-bold text-gray-500 uppercase">Strict Project Isolation</span>
+                <span className="text-[10px] font-bold text-gray-500 uppercase">Project Isolation</span>
               </div>
               <select
                 value={targetProjectId}
@@ -244,99 +246,34 @@ export const AddFirmAccountModal: React.FC<AddFirmAccountModalProps> = ({
                   </option>
                 ))}
               </select>
-              <p className="text-[11px] text-gray-500">
-                All bank accounts and escrows belong strictly to their designated project.
-              </p>
             </div>
           )}
 
-          {/* Section 1: Account Classification & Type */}
-          <div className="bg-amber-50/50 rounded-2xl p-4 border border-amber-200/80 space-y-3">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-black uppercase tracking-wider text-amber-950 flex items-center gap-1.5">
-                <CreditCard className="w-3.5 h-3.5 text-amber-700" />
-                <span>1. Select Project Account Type</span>
-              </label>
-              <span className="text-[11px] text-amber-800 font-medium">Statutory & Syndicate Compliance</span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-              {[
-                {
-                  type: 'rera_escrow' as FirmAccountType,
-                  label: 'RERA Statutory Escrow',
-                  desc: 'Mandatory 70% customer plot/flat advance escrow protected by RERA law',
-                  icon: ShieldCheck,
-                  badge: 'AP/TG RERA Law',
-                },
-                {
-                  type: 'syndicate_capital_pool' as FirmAccountType,
-                  label: 'Syndicate Capital Pool',
-                  desc: 'Venture Partners equity contributions & initial capital invest depository',
-                  icon: Landmark,
-                  badge: 'Partner Equity',
-                },
-                {
-                  type: 'current_operational' as FirmAccountType,
-                  label: 'Commercial Current A/c',
-                  desc: 'Daily vendor payments, earthwork contracts, diesel and legal liaison',
-                  icon: Building2,
-                  badge: 'Operational',
-                },
-                {
-                  type: 'field_petty_cash' as FirmAccountType,
-                  label: 'Site Petty Cash Treasury',
-                  desc: 'Imprest site cash vault for field partner batta, tractor repairs & coolie wages',
-                  icon: Wallet,
-                  badge: 'Cash Imprest',
-                },
-                {
-                  type: 'tax_statutory' as FirmAccountType,
-                  label: 'Tax & GST Statutory',
-                  desc: 'Dedicated account for GST 3B challans, TDS 194C, and SRO stamp duty',
-                  icon: Lock,
-                  badge: 'Tax Clearance',
-                },
-              ].map((item) => {
-                const isSelected = accountType === item.type;
-                const IconComponent = item.icon;
-                return (
-                  <button
-                    key={item.type}
-                    type="button"
-                    onClick={() => handleBankOrTypeChange(bankName, item.type)}
-                    className={`p-3 rounded-xl border text-left transition-all relative ${
-                      isSelected
-                        ? 'bg-amber-400/20 border-amber-600 ring-2 ring-amber-500/30 shadow-xs'
-                        : 'bg-white border-gray-200 hover:border-amber-300'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-1.5">
-                      <div className="flex items-center gap-1.5">
-                        <IconComponent className={`w-4 h-4 ${isSelected ? 'text-amber-800' : 'text-gray-500'}`} />
-                        <span className="text-xs font-black text-gray-950">{item.label}</span>
-                      </div>
-                      <span className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded ${
-                        isSelected ? 'bg-amber-500 text-gray-950' : 'bg-gray-100 text-gray-600'
-                      }`}>
-                        {item.badge}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-gray-600 leading-snug">{item.desc}</p>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Section 2: Account Details & Bank Selection */}
+          {/* Account Details & Bank Selection */}
           <div className="space-y-4">
             <h4 className="text-xs font-black uppercase tracking-wider text-gray-800 flex items-center gap-1.5">
               <Landmark className="w-3.5 h-3.5 text-gray-600" />
-              <span>2. Banking Institution & Account Identifier</span>
+              <span>Banking Institution &amp; Account Details</span>
             </h4>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">
+                  Project Account Type <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={accountType}
+                  onChange={(e) => handleBankOrTypeChange(bankName, e.target.value as FirmAccountType)}
+                  className="w-full text-xs font-bold text-gray-900 border border-gray-300 rounded-xl px-3 py-2.5 focus:ring-2 focus:ring-amber-500 focus:outline-none bg-white"
+                >
+                  <option value="rera_escrow">RERA Statutory Escrow (70% protected)</option>
+                  <option value="syndicate_capital_pool">Syndicate Capital Pool (Partner Equity)</option>
+                  <option value="current_operational">Commercial Current A/c (Operations &amp; Vendor)</option>
+                  <option value="field_petty_cash">Site Petty Cash Treasury (Cash Imprest)</option>
+                  <option value="tax_statutory">Tax &amp; GST Statutory</option>
+                </select>
+              </div>
+
               <div>
                 <label className="block text-xs font-bold text-gray-700 mb-1">
                   Bank / Depository Institution <span className="text-red-500">*</span>
@@ -352,7 +289,7 @@ export const AddFirmAccountModal: React.FC<AddFirmAccountModalProps> = ({
                 </select>
               </div>
 
-              <div>
+              <div className="sm:col-span-2">
                 <label className="block text-xs font-bold text-gray-700 mb-1">
                   Account Name / Display Label <span className="text-red-500">*</span>
                 </label>

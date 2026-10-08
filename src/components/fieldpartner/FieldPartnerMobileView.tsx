@@ -12,7 +12,8 @@ import {
   FirmAccountTransaction,
   ProjectExpense,
   LedgerMode,
-  IndividualInvestmentRecord
+  IndividualInvestmentRecord,
+  AuthenticatedAppUser
 } from '../../types';
 import { formatINR, formatIndianCompact } from '../../utils/formatters';
 import {
@@ -48,7 +49,8 @@ import {
   Hash,
   Briefcase,
   Users,
-  CreditCard
+  CreditCard,
+  KeyRound
 } from 'lucide-react';
 import { OpenPlottingModule } from '../accountant/OpenPlottingModule';
 import { ProjectStatementModule } from '../accountant/ProjectStatementModule';
@@ -81,6 +83,7 @@ export interface DrawingRequest {
 export interface FieldPartnerMobileViewProps {
   firm: TenantFirm;
   firms: TenantFirm[];
+  currentUser?: AuthenticatedAppUser | null;
   partners: SyndicatePartner[];
   plots: Plot[];
   apartmentUnits: ApartmentUnit[];
@@ -381,6 +384,7 @@ const cleanPhone = (ph: string) => (ph ? ph.replace(/\D/g, '').slice(-10) : '');
 export const FieldPartnerMobileView: React.FC<FieldPartnerMobileViewProps> = ({
   firm,
   firms,
+  currentUser,
   partners,
   plots,
   apartmentUnits,
@@ -914,6 +918,7 @@ export const FieldPartnerMobileView: React.FC<FieldPartnerMobileViewProps> = ({
 
   const handleExpenseSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!currentPartner) return;
     const numAmt = Number(expenseAmount);
     if (!numAmt || numAmt <= 0) {
       alert(lang === 'te' ? 'దయచేసి సరైన ఖర్చు మొత్తాన్ని నమోదు చేయండి.' : 'Please enter a valid expense amount.');
@@ -953,6 +958,7 @@ export const FieldPartnerMobileView: React.FC<FieldPartnerMobileViewProps> = ({
 
   const handleDrawingSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!currentPartner) return;
     const numAmt = Number(drawAmount);
     if (!numAmt || numAmt <= 0) {
       alert(lang === 'te' ? 'దయచేసి సరైన డ్రాయింగ్ మొత్తాన్ని నమోదు చేయండి.' : 'Please enter a valid drawing request amount.');
@@ -987,6 +993,7 @@ export const FieldPartnerMobileView: React.FC<FieldPartnerMobileViewProps> = ({
   };
 
   const handleApproveDrawing = (drawId: string) => {
+    if (!currentPartner) return;
     const updated = submittedDrawings.map((d) =>
       d.id === drawId
         ? {
@@ -1002,6 +1009,7 @@ export const FieldPartnerMobileView: React.FC<FieldPartnerMobileViewProps> = ({
   };
 
   const handleDisburseDrawing = (drawId: string) => {
+    if (!currentPartner) return;
     const draw = submittedDrawings.find((d) => d.id === drawId);
     if (!draw || draw.status === 'cleared') return;
 
